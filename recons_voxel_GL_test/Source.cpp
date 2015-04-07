@@ -73,7 +73,7 @@ std::vector<FrameData> frame_datas_unprocessed;
 
 cv::Mat opengl_projection;// , frame_opengl_projection;
 cv::Mat opengl_modelview;
-
+cv::Mat camera_matrix_current;
 /* ---------------------------------------------------------------------------- */
 void reshape(int width, int height)
 {
@@ -90,6 +90,8 @@ void reshape(int width, int height)
 	opengl_projection.create(4, 4, CV_32F);
 	glGetFloatv(GL_PROJECTION_MATRIX, (GLfloat*)opengl_projection.data);
 	opengl_projection = opengl_projection.t();
+
+	camera_matrix_current = generate_camera_intrinsic(width, height, fovy);
 }
 
 /* ---------------------------------------------------------------------------- */
@@ -237,6 +239,8 @@ void display(void)
 
 	//now take the different body part colors and map em to the proper textures
 
+	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+
 	cv::Mat render_pretexture = gl_read_color(win_width, win_height);
 
 	cv::Mat render_depth = gl_read_depth(win_width, win_height, opengl_projection);
@@ -250,7 +254,7 @@ void display(void)
 			cv::Vec3b orig_color = render_pretexture.ptr<cv::Vec3b>(y)[x];
 			if (orig_color == bg_color) continue;
 			for (int i = 0; i < bpdv.size(); ++i){
-				cv::Vec3b bp_color(bpdv[i].mColor[2] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[0] * 0xff);
+				cv::Vec3b bp_color(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
 	
 				if (orig_color == bp_color
 					){
@@ -291,7 +295,7 @@ void display(void)
 
 		cv::Mat target_transform = get_bodypart_transform(bpdv[i], snhmaps[best_frame]);
 		cv::Mat bodypart_img_uncropped = uncrop_mat(frame_datas[best_frame].mBodyPartImages[i], cv::Vec3b(0xff, 0xff, 0xff));
-		inverse_point_mapping(bodypart_pts[i], bodypart_pts_2d_v[i], frame_datas[anim_frame].mCameraMatrix, frame_datas[best_frame].mCameraMatrix, source_transform, target_transform,
+		inverse_point_mapping(bodypart_pts[i], bodypart_pts_2d_v[i], camera_matrix_current, frame_datas[best_frame].mCameraMatrix, source_transform, target_transform,
 			bodypart_img_uncropped, output_img);
 	}
 	
@@ -455,8 +459,7 @@ int main(int argc, char **argv)
 
 	glutGet(GLUT_ELAPSED_TIME);
 
-	opengl_modelview = 6 * cv::Mat::eye(4, 4, CV_32F);
-	opengl_modelview.ptr<float>(2)[3] = -3;
+	opengl_modelview = cv::Mat::eye(4, 4, CV_32F);
 
 	reshape(win_width, win_height);
 
