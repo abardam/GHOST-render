@@ -74,9 +74,16 @@ std::vector<FrameData> frame_datas_unprocessed;
 cv::Mat opengl_projection;// , frame_opengl_projection;
 cv::Mat opengl_modelview;
 cv::Mat camera_matrix_current;
+cv::Mat model_center;
+cv::Mat model_center_inv;
+
+BodypartFrameCluster bodypart_frame_cluster;
+
+bool debug_inspect_texture_map = false;
 /* ---------------------------------------------------------------------------- */
 void reshape(int width, int height)
 {
+	width = width / 4 * 4;
 	const double aspectRatio = (float)width / height, fieldOfView = fovy;
 
 	glMatrixMode(GL_PROJECTION);
@@ -100,6 +107,7 @@ void do_motion(void)
 
 	int time = glutGet(GLUT_ELAPSED_TIME);
 	//angle += (time - prev_time)*0.01;
+	
 	prev_time = time;
 
 	frames += 1;
@@ -160,6 +168,9 @@ void mouseMoveFunc(int x, int y){
 }
 
 void keyboardFunc(unsigned char key, int x, int y){
+	if (key == 'i'){
+		debug_inspect_texture_map = !debug_inspect_texture_map;
+	}
 }
 
 
@@ -195,9 +206,11 @@ void display(void)
 	//	glScalef(zoom, zoom, zoom);
 	//
 	//}
-	{
-		cv::Mat opengl_modelview_t = opengl_modelview.t();
-		glMultMatrixf(opengl_modelview_t.ptr<float>());
+	cv::Mat transformation = model_center * opengl_modelview * model_center_inv;
+
+	{		
+		cv::Mat transformation_t = transformation.t();
+		glMultMatrixf(transformation_t.ptr<float>());
 	}
 
 	//glBegin(GL_TRIANGLES);
@@ -211,6 +224,7 @@ void display(void)
 	//glEnd();
 
 	int anim_frame = (prev_time * ANIM_DEFAULT_FPS / 1000) % snhmaps.size();
+	anim_frame = 0;
 
 	glEnableClientState(GL_VERTEX_ARRAY);
 
@@ -245,8 +259,6 @@ void display(void)
 
 	cv::Mat render_depth = gl_read_depth(win_width, win_height, opengl_projection);
 
-
-	std::vector<cv::Mat> bodypart_pts(bpdv.size());
 	std::vector<std::vector<cv::Vec4f>> bodypart_pts_2d_withdepth_v(bpdv.size());
 	std::vector<std::vector<cv::Point2i>> bodypart_pts_2d_v(bpdv.size());
 	for (int y = 0; y < win_height; ++y){
@@ -275,28 +287,41 @@ void display(void)
 		if (bodypart_pts_2d_withdepth_v[i].size() == 0) continue;
 	
 		//convert the vector into a matrix
-		cv::Mat bodypart_pts_2d_r(1, bodypart_pts_2d_withdepth_v[i].size(), CV_32FC4, bodypart_pts_2d_withdepth_v[i].data());
-		cv::Mat bodypart_pts_2d_t = bodypart_pts_2d_r.reshape(1, bodypart_pts_2d_withdepth_v[i].size());
-	
-		bodypart_pts[i] = bodypart_pts_2d_t.t();
+		cv::Mat bodypart_pts = pointvec_to_pointmat(bodypart_pts_2d_withdepth_v[i]);
+
 		//now multiply the inverse bodypart transform + the bodypart transform for the best frame
 		//oh yeah, look for the best frame
 		//this should probably be in a different function, but how do i access it in display...?
 		//,maybe just global vars
 		
 	
-		cv::Mat source_transform = opengl_modelview * get_bodypart_transform(bpdv[i], snhmaps[anim_frame]);
+		cv::Mat source_transform = transformation * get_bodypart_transform(bpdv[i], snhmaps[anim_frame]);
 
-		unsigned int best_frame = find_best_frame(bpdv[i], source_transform, snhmaps);
+		//unsigned int best_frame = find_best_frame(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
+		std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
 
-		if (bpdv[i].mBodyPartName == "HEAD"){
-			std::cout << "head best frame: " << best_frame << "; actual frame: " << anim_frame << std::endl;
+
+		cv::Mat neutral_pts = (camera_matrix_current * source_transform).inv() * bodypart_pts;
+
+		for (int best_frames_it = 0; best_frames_it < best_frames.size() && !neutral_pts.empty(); ++best_frames_it){
+
+			unsigned int best_frame = best_frames[best_frames_it];
+
+			//if (bpdv[i].mBodyPartName == "HEAD"){
+			//	std::cout << "head best frame: " << best_frame << "; actual frame: " << anim_frame << std::endl;
+			//}
+			cv::Mat target_transform = get_bodypart_transform(bpdv[i], snhmaps[best_frame]);
+			cv::Mat bodypart_img_uncropped = uncrop_mat(frame_datas[best_frame].mBodyPartImages[i], cv::Vec3b(0xff, 0xff, 0xff));
+
+			cv::Mat neutral_pts_occluded;
+			std::vector<cv::Point2i> _2d_pts_occluded;
+
+			inverse_point_mapping(neutral_pts, bodypart_pts_2d_v[i], frame_datas[best_frame].mCameraMatrix, target_transform,
+				bodypart_img_uncropped, output_img, neutral_pts_occluded, _2d_pts_occluded, debug_inspect_texture_map);
+
+			neutral_pts = neutral_pts_occluded;
+			bodypart_pts_2d_v[i] = _2d_pts_occluded;
 		}
-
-		cv::Mat target_transform = get_bodypart_transform(bpdv[i], snhmaps[best_frame]);
-		cv::Mat bodypart_img_uncropped = uncrop_mat(frame_datas[best_frame].mBodyPartImages[i], cv::Vec3b(0xff, 0xff, 0xff));
-		inverse_point_mapping(bodypart_pts[i], bodypart_pts_2d_v[i], camera_matrix_current, frame_datas[best_frame].mCameraMatrix, source_transform, target_transform,
-			bodypart_img_uncropped, output_img);
 	}
 	
 	cv::Mat output_img_flip;
@@ -364,6 +389,7 @@ int main(int argc, char **argv)
 
 	load_processed_frames(filenames, bpdv.size(), frame_datas);
 
+
 	std::vector<PointMap> pointmaps;
 
 	//load_frames(filenames, pointmaps, frame_datas_unprocessed);
@@ -373,11 +399,39 @@ int main(int argc, char **argv)
 		cv_draw_and_build_skeleton(&frame_datas[i].mRoot, frame_datas[i].mCameraPose, frame_datas[i].mCameraMatrix, &snhmaps[i]);
 	}
 
+	cv::Vec4f center_pt(0,0,0,0);
+
+	for (int i = 0; i < bpdv.size(); ++i){
+		cv::Mat bp_pt_m = get_bodypart_transform(bpdv[i], snhmaps[0])(cv::Range(0, 4), cv::Range(3, 4));
+		cv::Vec4f bp_pt = bp_pt_m;
+		center_pt += bp_pt;
+	}
+
+	center_pt /= center_pt(3);
+
+	model_center = cv::Mat::eye(4, 4, CV_32F);
+	cv::Mat(center_pt).copyTo(model_center(cv::Range(0, 4), cv::Range(3, 4)));
+	model_center_inv = model_center.inv();
+
+	//filenameSS.str("");
+	//filenameSS << video_directory << "/clusters.xml.gz";
+	//
+	//fs.open(filenameSS.str(), cv::FileStorage::READ);
+	//
+	//read(fs["bodypart_frame_clusters"], bodypart_frame_cluster);
+	//
+	//fs.release();
+
+	//bodypart_frame_cluster = cluster_frames(64, bpdv, snhmaps, frame_datas, 1000);
+	bodypart_frame_cluster.resize(bpdv.size());
+
 	load_voxels(voxel_recons_path, cylinders, voxels, TSDF_array, weight_array, voxel_size);
 
 	triangle_vertices.resize(bpdv.size());
 	triangle_indices.resize(bpdv.size());
 	triangle_colors.resize(bpdv.size());
+
+	double num_vertices = 0;
 
 	for (int i = 0; i < bpdv.size(); ++i){
 		std::vector<TRIANGLE> tri_add;
@@ -421,6 +475,7 @@ int main(int argc, char **argv)
 			triangle_colors[i].push_back(bpdv[i].mColor[1]*255);
 			triangle_colors[i].push_back(bpdv[i].mColor[2]*255);
 		}
+		num_vertices += vertices.size();
 		for (int j = 0; j < vertex_indices.size(); ++j){
 			triangle_indices[i].push_back(vertex_indices[j]);
 		}
