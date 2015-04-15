@@ -33,23 +33,23 @@
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\ReconsOptimization_debug.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\OpenCV_debug.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\CvDraw_debug.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\ReconsVoxel_debug.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GLUT.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GLCV_debug.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GHOSTLIB_debug.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\ReconsOptimization_debug.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\OpenCV_debug.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\CvDraw_debug.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\ReconsVoxel_debug.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\GLUT.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\GLCV_debug.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\GHOSTLIB_debug.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\ReconsOptimization.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\OpenCV.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\CvDraw.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\ReconsVoxel.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GLUT.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GLCV.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GHOSTLIB.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\ReconsOptimization.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\OpenCV.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\CvDraw.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\ReconsVoxel.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\GLUT.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\GLCV.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\GHOSTLIB.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup />
