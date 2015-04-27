@@ -80,6 +80,7 @@ cv::Mat model_center_inv;
 BodypartFrameCluster bodypart_frame_cluster;
 
 bool debug_inspect_texture_map = false;
+bool debug_draw_texture = true;
 /* ---------------------------------------------------------------------------- */
 void reshape(int width, int height)
 {
@@ -168,8 +169,11 @@ void mouseMoveFunc(int x, int y){
 }
 
 void keyboardFunc(unsigned char key, int x, int y){
-	if (key == 'i'){
+	if (key == 'i' || key == 'I'){
 		debug_inspect_texture_map = !debug_inspect_texture_map;
+	}
+	if (key == 't' || key == 'T'){
+		debug_draw_texture = !debug_draw_texture;
 	}
 }
 
@@ -224,7 +228,6 @@ void display(void)
 	//glEnd();
 
 	int anim_frame = (prev_time * ANIM_DEFAULT_FPS / 1000) % snhmaps.size();
-	anim_frame = 0;
 
 	glEnableClientState(GL_VERTEX_ARRAY);
 
@@ -253,82 +256,85 @@ void display(void)
 
 	//now take the different body part colors and map em to the proper textures
 
-	glPixelStorei(GL_PACK_ALIGNMENT, 1);
+	if (debug_draw_texture){
 
-	cv::Mat render_pretexture = gl_read_color(win_width, win_height);
+		glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
-	cv::Mat render_depth = gl_read_depth(win_width, win_height, opengl_projection);
+		cv::Mat render_pretexture = gl_read_color(win_width, win_height);
 
-	std::vector<std::vector<cv::Vec4f>> bodypart_pts_2d_withdepth_v(bpdv.size());
-	std::vector<std::vector<cv::Point2i>> bodypart_pts_2d_v(bpdv.size());
-	for (int y = 0; y < win_height; ++y){
-		for (int x = 0; x < win_width; ++x){
-			cv::Vec3b orig_color = render_pretexture.ptr<cv::Vec3b>(y)[x];
-			if (orig_color == bg_color) continue;
-			for (int i = 0; i < bpdv.size(); ++i){
-				cv::Vec3b bp_color(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
-	
-				if (orig_color == bp_color
-					){
-					float depth = render_depth.ptr<float>(y)[x];
-					bodypart_pts_2d_withdepth_v[i].push_back(cv::Vec4f(depth*x, depth*y,
-						depth, 1));
-					bodypart_pts_2d_v[i].push_back(cv::Point2i(x, y));
-					break;
+		cv::Mat render_depth = gl_read_depth(win_width, win_height, opengl_projection);
+
+		std::vector<std::vector<cv::Vec4f>> bodypart_pts_2d_withdepth_v(bpdv.size());
+		std::vector<std::vector<cv::Point2i>> bodypart_pts_2d_v(bpdv.size());
+		for (int y = 0; y < win_height; ++y){
+			for (int x = 0; x < win_width; ++x){
+				cv::Vec3b orig_color = render_pretexture.ptr<cv::Vec3b>(y)[x];
+				if (orig_color == bg_color) continue;
+				for (int i = 0; i < bpdv.size(); ++i){
+					cv::Vec3b bp_color(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
+
+					if (orig_color == bp_color
+						){
+						float depth = render_depth.ptr<float>(y)[x];
+						bodypart_pts_2d_withdepth_v[i].push_back(cv::Vec4f(depth*x, depth*y,
+							depth, 1));
+						bodypart_pts_2d_v[i].push_back(cv::Point2i(x, y));
+						break;
+					}
 				}
 			}
 		}
-	}
-	
-	cv::Mat output_img(win_height, win_width, CV_8UC3, cv::Scalar(0, 0, 0));
-	
-	for (int i = 0; i < bpdv.size(); ++i){
-	
-		if (bodypart_pts_2d_withdepth_v[i].size() == 0) continue;
-	
-		//convert the vector into a matrix
-		cv::Mat bodypart_pts = pointvec_to_pointmat(bodypart_pts_2d_withdepth_v[i]);
 
-		//now multiply the inverse bodypart transform + the bodypart transform for the best frame
-		//oh yeah, look for the best frame
-		//this should probably be in a different function, but how do i access it in display...?
-		//,maybe just global vars
-		
-	
-		cv::Mat source_transform = transformation * get_bodypart_transform(bpdv[i], snhmaps[anim_frame]);
+		cv::Mat output_img(win_height, win_width, CV_8UC3, cv::Scalar(0, 0, 0));
 
-		//unsigned int best_frame = find_best_frame(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
-		std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
+		for (int i = 0; i < bpdv.size(); ++i){
+
+			if (bodypart_pts_2d_withdepth_v[i].size() == 0) continue;
+
+			//convert the vector into a matrix
+			cv::Mat bodypart_pts = pointvec_to_pointmat(bodypart_pts_2d_withdepth_v[i]);
+
+			//now multiply the inverse bodypart transform + the bodypart transform for the best frame
+			//oh yeah, look for the best frame
+			//this should probably be in a different function, but how do i access it in display...?
+			//,maybe just global vars
 
 
-		cv::Mat neutral_pts = (camera_matrix_current * source_transform).inv() * bodypart_pts;
+			cv::Mat source_transform = transformation * get_bodypart_transform(bpdv[i], snhmaps[anim_frame]);
 
-		for (int best_frames_it = 0; best_frames_it < best_frames.size() && !neutral_pts.empty(); ++best_frames_it){
+			//unsigned int best_frame = find_best_frame(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
+			std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
 
-			unsigned int best_frame = best_frames[best_frames_it];
 
-			//if (bpdv[i].mBodyPartName == "HEAD"){
-			//	std::cout << "head best frame: " << best_frame << "; actual frame: " << anim_frame << std::endl;
-			//}
-			cv::Mat target_transform = get_bodypart_transform(bpdv[i], snhmaps[best_frame]);
-			cv::Mat bodypart_img_uncropped = uncrop_mat(frame_datas[best_frame].mBodyPartImages[i], cv::Vec3b(0xff, 0xff, 0xff));
+			cv::Mat neutral_pts = (camera_matrix_current * source_transform).inv() * bodypart_pts;
 
-			cv::Mat neutral_pts_occluded;
-			std::vector<cv::Point2i> _2d_pts_occluded;
+			for (int best_frames_it = 0; best_frames_it < best_frames.size() && !neutral_pts.empty(); ++best_frames_it){
 
-			inverse_point_mapping(neutral_pts, bodypart_pts_2d_v[i], frame_datas[best_frame].mCameraMatrix, target_transform,
-				bodypart_img_uncropped, output_img, neutral_pts_occluded, _2d_pts_occluded, debug_inspect_texture_map);
+				unsigned int best_frame = best_frames[best_frames_it];
 
-			neutral_pts = neutral_pts_occluded;
-			bodypart_pts_2d_v[i] = _2d_pts_occluded;
+				//if (bpdv[i].mBodyPartName == "HEAD"){
+				//	std::cout << "head best frame: " << best_frame << "; actual frame: " << anim_frame << std::endl;
+				//}
+				cv::Mat target_transform = get_bodypart_transform(bpdv[i], snhmaps[best_frame]);
+				cv::Mat bodypart_img_uncropped = uncrop_mat(frame_datas[best_frame].mBodyPartImages[i], cv::Vec3b(0xff, 0xff, 0xff));
+
+				cv::Mat neutral_pts_occluded;
+				std::vector<cv::Point2i> _2d_pts_occluded;
+
+				inverse_point_mapping(neutral_pts, bodypart_pts_2d_v[i], frame_datas[best_frame].mCameraMatrix, target_transform,
+					bodypart_img_uncropped, output_img, neutral_pts_occluded, _2d_pts_occluded, debug_inspect_texture_map);
+
+				neutral_pts = neutral_pts_occluded;
+				bodypart_pts_2d_v[i] = _2d_pts_occluded;
+			}
 		}
-	}
-	
-	cv::Mat output_img_flip;
-	cv::flip(output_img, output_img_flip, 0);
 
-	//now display the rendered pts
-	display_mat(output_img_flip, true);
+		cv::Mat output_img_flip;
+		cv::flip(output_img, output_img_flip, 0);
+
+		//now display the rendered pts
+		display_mat(output_img_flip, true);
+	}
 	
 	glutSwapBuffers();
 	do_motion();
