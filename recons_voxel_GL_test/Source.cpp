@@ -49,6 +49,7 @@ int window1;
 
 //bg color
 cv::Vec3b bg_color;
+cv::Scalar output_bg_color;
 
 float fovy = 45.;
 
@@ -237,7 +238,7 @@ void display(void)
 
 	for (int i = 0; i < bpdv.size(); ++i){
 		glPushMatrix();
-		cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame]) * get_voxel_transform(voxels[i].width, voxels[i].height, voxels[i].depth, voxel_size)).t();
+		cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose) * get_voxel_transform(voxels[i].width, voxels[i].height, voxels[i].depth, voxel_size)).t();
 		glMultMatrixf(transform_t.ptr<float>());
 
 		glVertexPointer(3, GL_FLOAT, 0, triangle_vertices[i].data());
@@ -285,7 +286,7 @@ void display(void)
 			}
 		}
 
-		cv::Mat output_img(win_height, win_width, CV_8UC3, cv::Scalar(0, 0, 0));
+		cv::Mat output_img(win_height, win_width, CV_8UC3, output_bg_color);
 
 		for (int i = 0; i < bpdv.size(); ++i){
 
@@ -300,10 +301,10 @@ void display(void)
 			//,maybe just global vars
 
 
-			cv::Mat source_transform = transformation * get_bodypart_transform(bpdv[i], snhmaps[anim_frame]);
+			cv::Mat source_transform = transformation * get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose);
 
 			//unsigned int best_frame = find_best_frame(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
-			std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
+			std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], source_transform, snhmaps, frame_datas, bodypart_frame_cluster[i]);
 
 
 			cv::Mat neutral_pts = (camera_matrix_current * source_transform).inv() * bodypart_pts;
@@ -315,7 +316,7 @@ void display(void)
 				//if (bpdv[i].mBodyPartName == "HEAD"){
 				//	std::cout << "head best frame: " << best_frame << "; actual frame: " << anim_frame << std::endl;
 				//}
-				cv::Mat target_transform = get_bodypart_transform(bpdv[i], snhmaps[best_frame]);
+				cv::Mat target_transform = get_bodypart_transform(bpdv[i], snhmaps[best_frame], frame_datas[best_frame].mCameraPose);
 				cv::Mat bodypart_img_uncropped = uncrop_mat(frame_datas[best_frame].mBodyPartImages[i], cv::Vec3b(0xff, 0xff, 0xff));
 
 				cv::Mat neutral_pts_occluded;
@@ -402,13 +403,13 @@ int main(int argc, char **argv)
 
 	for (int i = 0; i < frame_datas.size(); ++i){
 		snhmaps.push_back(SkeletonNodeHardMap());
-		cv_draw_and_build_skeleton(&frame_datas[i].mRoot, frame_datas[i].mCameraPose, frame_datas[i].mCameraMatrix, &snhmaps[i]);
+		cv_draw_and_build_skeleton(&frame_datas[i].mRoot, cv::Mat::eye(4,4,CV_32F), frame_datas[i].mCameraMatrix, frame_datas[i].mCameraPose, &snhmaps[i]);
 	}
 
 	cv::Vec4f center_pt(0,0,0,0);
 
 	for (int i = 0; i < bpdv.size(); ++i){
-		cv::Mat bp_pt_m = get_bodypart_transform(bpdv[i], snhmaps[0])(cv::Range(0, 4), cv::Range(3, 4));
+		cv::Mat bp_pt_m = get_bodypart_transform(bpdv[i], snhmaps[0], frame_datas[0].mCameraPose)(cv::Range(0, 4), cv::Range(3, 4));
 		cv::Vec4f bp_pt = bp_pt_m;
 		center_pt += bp_pt;
 	}
@@ -504,8 +505,9 @@ int main(int argc, char **argv)
 	glutKeyboardUpFunc(keyboardFunc);
 
 
-	glClearColor(0.1f, 0.1f, 0.1f, 1.f);
+	glClearColor(0.1f, 0.3f, 0.3f, 1.f);
 	bg_color = cv::Vec3b(0.1 * 0xff, 0.1 * 0xff, 0.1 * 0xff);
+	output_bg_color = cv::Scalar(0.1 * 0xff, 0.4 * 0xff, 0.3 * 0xff);
 
 	//glEnable(GL_LIGHTING);
 	//glEnable(GL_LIGHT0);    /* Uses default lighting parameters */
