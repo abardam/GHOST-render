@@ -26,8 +26,10 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 #include <gh_search.h>
 #include <gh_common.h>
 
-float zNear = 1.0, zFar = 10.0;
+float zNear = 0.1, zFar = 10.0;
 
+#define USE_KINECT_INTRINSICS 1
+float ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0;
 
 //manual zoom
 float zoom = 1.f;
@@ -82,16 +84,32 @@ BodypartFrameCluster bodypart_frame_cluster;
 
 bool debug_inspect_texture_map = false;
 bool debug_draw_texture = true;
+bool debug_draw_skeleton = true;
 /* ---------------------------------------------------------------------------- */
 void reshape(int width, int height)
 {
-	width = width / 4 * 4;
 	const double aspectRatio = (float)width / height, fieldOfView = fovy;
 
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();
-	gluPerspective(fieldOfView, aspectRatio,
-		zNear, zFar);  /* Znear and Zfar */
+
+	if (USE_KINECT_INTRINSICS){
+		int viewport[4];
+		cv::Mat proj_t = build_opengl_projection_for_intrinsics(viewport, -ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0, width, height, zNear, zFar).t(); //NOTE: ki_alpha is negative(for some reason openGL switches it)
+		glMultMatrixf(proj_t.ptr<float>());
+
+		camera_matrix_current = cv::Mat::eye(4, 4, CV_32F);
+		camera_matrix_current.ptr<float>(0)[0] = ki_alpha;
+		camera_matrix_current.ptr<float>(1)[1] = ki_beta;
+		camera_matrix_current.ptr<float>(0)[1] = ki_gamma;
+		camera_matrix_current.ptr<float>(0)[2] = ki_u0;
+		camera_matrix_current.ptr<float>(1)[2] = ki_v0;
+	}
+	else{
+		gluPerspective(fieldOfView, aspectRatio,
+			zNear, zFar);  /* Znear and Zfar */
+		camera_matrix_current = generate_camera_intrinsic(width, height, fovy);
+	}
 	glViewport(0, 0, width, height);
 	win_width = width;
 	win_height = height;
@@ -99,8 +117,6 @@ void reshape(int width, int height)
 	opengl_projection.create(4, 4, CV_32F);
 	glGetFloatv(GL_PROJECTION_MATRIX, (GLfloat*)opengl_projection.data);
 	opengl_projection = opengl_projection.t();
-
-	camera_matrix_current = generate_camera_intrinsic(width, height, fovy);
 }
 
 /* ---------------------------------------------------------------------------- */
@@ -176,6 +192,9 @@ void keyboardFunc(unsigned char key, int x, int y){
 	if (key == 't' || key == 'T'){
 		debug_draw_texture = !debug_draw_texture;
 	}
+	if (key == 's' || key == 'S'){
+		debug_draw_skeleton = !debug_draw_skeleton;
+	}
 }
 
 
@@ -218,17 +237,8 @@ void display(void)
 		glMultMatrixf(transformation_t.ptr<float>());
 	}
 
-	//glBegin(GL_TRIANGLES);
-	//
-	//for (int i = 0; i < tris.size(); ++i){
-	//	glVertex3f(tris[i].p[0](0), tris[i].p[0](1), tris[i].p[0](2));
-	//	glVertex3f(tris[i].p[1](0), tris[i].p[1](1), tris[i].p[1](2));
-	//	glVertex3f(tris[i].p[2](0), tris[i].p[2](1), tris[i].p[2](2));
-	//}
-	//
-	//glEnd();
-
 	int anim_frame = (prev_time * ANIM_DEFAULT_FPS / 1000) % snhmaps.size();
+
 
 	glEnableClientState(GL_VERTEX_ARRAY);
 
@@ -336,6 +346,27 @@ void display(void)
 		//now display the rendered pts
 		display_mat(output_img_flip, true);
 	}
+
+	if (debug_draw_skeleton){
+		glDisable(GL_DEPTH_TEST);
+		glColor3f(1.f, 0., 0.);
+		glBegin(GL_LINES);
+		for (int i = 0; i < bpdv.size(); ++i){
+			cv::Mat endpts(4, 2, CV_32F, cv::Scalar(1));
+			endpts.ptr<float>(0)[0] = 0;
+			endpts.ptr<float>(1)[0] = 0;
+			endpts.ptr<float>(2)[0] = 0;
+			endpts.ptr<float>(0)[1] = 0;
+			endpts.ptr<float>(1)[1] = voxels[i].height * voxel_size;
+			endpts.ptr<float>(2)[1] = 0;
+
+			endpts = get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose) * endpts;
+			glVertex3f(endpts.ptr<float>(0)[0], endpts.ptr<float>(1)[0], -endpts.ptr<float>(2)[0]);
+			glVertex3f(endpts.ptr<float>(0)[1], endpts.ptr<float>(1)[1], -endpts.ptr<float>(2)[1]);
+		}
+		glEnd();
+		glEnable(GL_DEPTH_TEST);
+	}
 	
 	glutSwapBuffers();
 	do_motion();
@@ -353,6 +384,17 @@ int main(int argc, char **argv)
 	if (argc <= 2){
 		printf("Please enter directory and voxel reconstruct file\n");
 		return 0;
+	}
+
+
+	if (USE_KINECT_INTRINSICS){
+		cv::FileStorage fs;
+		fs.open("out_cameramatrix_test.yml", cv::FileStorage::READ);
+		fs["alpha"] >> ki_alpha;
+		fs["beta"] >> ki_beta;
+		fs["gamma"] >> ki_gamma;
+		fs["u"] >> ki_u0;
+		fs["v"] >> ki_v0;
 	}
 
 	std::string video_directory(argv[1]);
