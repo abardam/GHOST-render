@@ -40,16 +40,22 @@
     <Import Project="$(PROPERTY_SHEETS_DIR)\GLUT.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\GLCV_debug.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\GHOSTLIB_debug.props" />
+    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GLEW_debug.props" />
+    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\OpenGL.props" />
+    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\FBOLIB_debug.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\ReconsOptimization.props" />
+    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\OpenGL.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\OpenCV.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\CvDraw.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\ReconsVoxel.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\GLUT.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\GLCV.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\GHOSTLIB.props" />
+    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GLEW.props" />
+    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\FBOLIB.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup />
@@ -80,7 +86,11 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="cylinder.cpp" />
     <ClCompile Include="Source.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="cylinder.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

@@ -2,6 +2,7 @@
 ITP (In This Project) we attempt to perform marching cubes on the reconstructed voxels to generate a mesh, which we will then render using opengl.
 
 */
+#include "cylinder.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -26,7 +27,11 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 #include <gh_search.h>
 #include <gh_common.h>
 
+#include <fbolib.h>
+
 float zNear = 0.1, zFar = 10.0;
+
+#define MAX_SEARCH 10
 
 #define USE_KINECT_INTRINSICS 1
 float ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0;
@@ -56,8 +61,11 @@ cv::Scalar output_bg_color;
 float fovy = 45.;
 
 GLint prev_time = 0;
+GLint elapsed_time = 0;
 GLint prev_fps_time = 0;
 int frames = 0;
+int anim_frame = 0;
+float anim_frame_f = 0;
 
 //std::vector<TRIANGLE> tris;
 
@@ -85,6 +93,18 @@ BodypartFrameCluster bodypart_frame_cluster;
 bool debug_inspect_texture_map = false;
 bool debug_draw_texture = true;
 bool debug_draw_skeleton = true;
+bool playing = true;
+bool debug_shape_cylinders = false;
+
+std::string video_directory = "";
+std::string voxel_recons_path = "";
+int numframes = 10;
+bool skip_side = false;
+float tsdf_offset = 0;
+
+GLUquadric * quadric;
+FBO fbo1(1000,1000);
+
 /* ---------------------------------------------------------------------------- */
 void reshape(int width, int height)
 {
@@ -95,7 +115,7 @@ void reshape(int width, int height)
 
 	if (USE_KINECT_INTRINSICS){
 		int viewport[4];
-		cv::Mat proj_t = build_opengl_projection_for_intrinsics(viewport, -ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0, width, height, zNear, zFar).t(); //NOTE: ki_alpha is negative(for some reason openGL switches it)
+		cv::Mat proj_t = build_opengl_projection_for_intrinsics(viewport, -ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0+10, width, height, zNear, zFar).t(); //NOTE: ki_alpha is negative(for some reason openGL switches it). NOTE2: 10 is FUDGE
 		glMultMatrixf(proj_t.ptr<float>());
 
 		camera_matrix_current = cv::Mat::eye(4, 4, CV_32F);
@@ -126,6 +146,13 @@ void do_motion(void)
 	int time = glutGet(GLUT_ELAPSED_TIME);
 	//angle += (time - prev_time)*0.01;
 	
+	if (playing){
+		elapsed_time = time - prev_time;
+	}
+	else{
+		elapsed_time = 0;
+	}
+
 	prev_time = time;
 
 	frames += 1;
@@ -186,14 +213,21 @@ void mouseMoveFunc(int x, int y){
 }
 
 void keyboardFunc(unsigned char key, int x, int y){
-	if (key == 'i' || key == 'I'){
+	key = tolower(key);
+	if (key == 'i'){
 		debug_inspect_texture_map = !debug_inspect_texture_map;
 	}
-	if (key == 't' || key == 'T'){
+	if (key == 't'){
 		debug_draw_texture = !debug_draw_texture;
 	}
-	if (key == 's' || key == 'S'){
+	if (key == 's'){
 		debug_draw_skeleton = !debug_draw_skeleton;
+	}
+	if (key == 'p'){
+		playing = !playing;
+	}
+	if (key == 'c'){
+		debug_shape_cylinders = !debug_shape_cylinders;
 	}
 }
 
@@ -205,10 +239,7 @@ void display(void)
 
 	float tmp;
 
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
 
 	//if (auto_rotate){
 	//	gluLookAt(0.f, 0.f, 3.f, 0.f, 0.f, -5.f, 0.f, 1.f, 0.f);
@@ -230,15 +261,35 @@ void display(void)
 	//	glScalef(zoom, zoom, zoom);
 	//
 	//}
-	cv::Mat transformation = model_center * opengl_modelview * model_center_inv;
 
-	{		
+	anim_frame_f += (elapsed_time * ANIM_DEFAULT_FPS / 1000.f);
+	if (anim_frame_f >= snhmaps.size()){
+		anim_frame_f -= snhmaps.size();
+	}
+	anim_frame = anim_frame_f;
+	while (skip_side && frame_datas[anim_frame].mnFacing != FACING_FRONT && frame_datas[anim_frame].mnFacing != FACING_BACK){
+		++anim_frame_f; 
+		anim_frame = anim_frame_f;
+		anim_frame %= snhmaps.size();
+	}
+	anim_frame = anim_frame_f;
+
+
+	anim_frame %= snhmaps.size();
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo1.fboId);
+
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
+	cv::Mat transformation = model_center * opengl_modelview * model_center_inv;
+	{
 		cv::Mat transformation_t = transformation.t();
 		glMultMatrixf(transformation_t.ptr<float>());
 	}
-
-	int anim_frame = (prev_time * ANIM_DEFAULT_FPS / 1000) % snhmaps.size();
-
 
 	glEnableClientState(GL_VERTEX_ARRAY);
 
@@ -248,15 +299,29 @@ void display(void)
 
 	for (int i = 0; i < bpdv.size(); ++i){
 		glPushMatrix();
-		cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose) * get_voxel_transform(voxels[i].width, voxels[i].height, voxels[i].depth, voxel_size)).t();
-		glMultMatrixf(transform_t.ptr<float>());
 
-		glVertexPointer(3, GL_FLOAT, 0, triangle_vertices[i].data());
-		glColorPointer(3, GL_UNSIGNED_BYTE, 0, triangle_colors[i].data());
+		if (debug_shape_cylinders){
 
-		glColor3fv(bpdv[i].mColor);
+			cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose)).t();
+			glMultMatrixf(transform_t.ptr<float>());
 
-		glDrawElements(GL_TRIANGLES, triangle_indices[i].size(), GL_UNSIGNED_INT, triangle_indices[i].data());
+			glVertexPointer(3, GL_FLOAT, 0, triangle_vertices[i].data());
+			glColorPointer(3, GL_UNSIGNED_BYTE, 0, triangle_colors[i].data());
+			glColor3fv(bpdv[i].mColor);
+
+			renderCylinder(0, 0, 0, 0, voxels[i].height * voxel_size, 0, cylinders[i].width, 16, quadric);
+
+		}
+		else{
+			cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose) * get_voxel_transform(voxels[i].width, voxels[i].height, voxels[i].depth, voxel_size)).t();
+			glMultMatrixf(transform_t.ptr<float>());
+
+			glVertexPointer(3, GL_FLOAT, 0, triangle_vertices[i].data());
+			glColorPointer(3, GL_UNSIGNED_BYTE, 0, triangle_colors[i].data());
+			glColor3fv(bpdv[i].mColor);
+
+			glDrawElements(GL_TRIANGLES, triangle_indices[i].size(), GL_UNSIGNED_INT, triangle_indices[i].data());
+		}
 
 		glPopMatrix();
 	}
@@ -272,6 +337,7 @@ void display(void)
 		glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
 		cv::Mat render_pretexture = gl_read_color(win_width, win_height);
+		//cv::imwrite("renpre.png", render_pretexture);
 
 		cv::Mat render_depth = gl_read_depth(win_width, win_height, opengl_projection);
 
@@ -296,7 +362,7 @@ void display(void)
 			}
 		}
 
-		cv::Mat output_img(win_height, win_width, CV_8UC3, output_bg_color);
+		cv::Mat output_img(win_height, win_width, CV_8UC4, cv::Scalar(0,0,0,0));
 
 		for (int i = 0; i < bpdv.size(); ++i){
 
@@ -318,6 +384,8 @@ void display(void)
 
 
 			cv::Mat neutral_pts = (camera_matrix_current * source_transform).inv() * bodypart_pts;
+
+			int search_limit = std::min((int)best_frames.size(), MAX_SEARCH);
 
 			for (int best_frames_it = 0; best_frames_it < best_frames.size() && !neutral_pts.empty(); ++best_frames_it){
 
@@ -343,11 +411,24 @@ void display(void)
 		cv::Mat output_img_flip;
 		cv::flip(output_img, output_img_flip, 0);
 
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
 		//now display the rendered pts
 		display_mat(output_img_flip, true);
 	}
 
 	if (debug_draw_skeleton){
+
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+		glMatrixMode(GL_MODELVIEW);
+		glLoadIdentity();
+		cv::Mat transformation = model_center * opengl_modelview * model_center_inv;
+		{
+			cv::Mat transformation_t = transformation.t();
+			glMultMatrixf(transformation_t.ptr<float>());
+		}
+
 		glDisable(GL_DEPTH_TEST);
 		glColor3f(1.f, 0., 0.);
 		glBegin(GL_LINES);
@@ -361,8 +442,8 @@ void display(void)
 			endpts.ptr<float>(2)[1] = 0;
 
 			endpts = get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose) * endpts;
-			glVertex3f(endpts.ptr<float>(0)[0], endpts.ptr<float>(1)[0], -endpts.ptr<float>(2)[0]);
-			glVertex3f(endpts.ptr<float>(0)[1], endpts.ptr<float>(1)[1], -endpts.ptr<float>(2)[1]);
+			glVertex3f(endpts.ptr<float>(0)[0], endpts.ptr<float>(1)[0], endpts.ptr<float>(2)[0]);
+			glVertex3f(endpts.ptr<float>(0)[1], endpts.ptr<float>(1)[1], endpts.ptr<float>(2)[1]);
 		}
 		glEnd();
 		glEnable(GL_DEPTH_TEST);
@@ -381,10 +462,6 @@ void display(void)
 /* ---------------------------------------------------------------------------- */
 int main(int argc, char **argv)
 {
-	if (argc <= 2){
-		printf("Please enter directory and voxel reconstruct file\n");
-		return 0;
-	}
 
 
 	if (USE_KINECT_INTRINSICS){
@@ -397,19 +474,47 @@ int main(int argc, char **argv)
 		fs["v"] >> ki_v0;
 	}
 
-	std::string video_directory(argv[1]);
-	std::string voxel_recons_path(argv[2]);
+	for (int i = 1; i < argc; ++i){
+		if (strcmp(argv[i], "-d") == 0){
+			video_directory = std::string(argv[i + 1]);
+			++i;
+		}
+		else if (strcmp(argv[i], "-v") == 0){
+			voxel_recons_path = std::string(argv[i + 1]);
+			++i;
+		}
+		else if (strcmp(argv[i], "-n") == 0){
+			numframes = atoi(argv[i+1]);
+			++i;
+		}
+		else if (strcmp(argv[i], "-s") == 0){
+			skip_side = true;
+			++i;
+		}
+		else if (strcmp(argv[i], "-t") == 0){
+			tsdf_offset = atof(argv[i + 1]);
+			++i;
+		}
+		else{
+			std::cout << "Options: -d [video directory] -v [voxel path] -n [num frames] -t [tsdf offset]\n"
+				<< "-s: skip non-front and back frames\n";
+			return 0;
+		}
+	}
+
+	if (video_directory == ""){
+		std::cout << "Specify video directory!\n";
+		return 0;
+	}
+
+	if (voxel_recons_path == ""){
+		std::cout << "Specify voxel path!\n";
+		return 0;
+	}
 
 	std::stringstream filenameSS;
 	int startframe = 0;
-	int numframes;
-	if (argc >= 3)
-	{
-		numframes = atoi(argv[3]);
-	}
-	else{
-		numframes = 10;
-	}
+	
 	cv::FileStorage fs;
 
 	filenameSS << video_directory << "/bodypartdefinitions.xml.gz";
@@ -436,7 +541,7 @@ int main(int argc, char **argv)
 	std::vector<cv::Mat> TSDF_array;
 	std::vector<cv::Mat> weight_array;
 
-	load_processed_frames(filenames, bpdv.size(), frame_datas);
+	load_processed_frames(filenames, bpdv.size(), frame_datas, false);
 
 
 	std::vector<PointMap> pointmaps;
@@ -485,6 +590,8 @@ int main(int argc, char **argv)
 	for (int i = 0; i < bpdv.size(); ++i){
 		std::vector<TRIANGLE> tri_add;
 		
+		cv::add(tsdf_offset * cv::Mat::ones(TSDF_array[i].rows, TSDF_array[i].cols, CV_32F), TSDF_array[i], TSDF_array[i]);
+
 		if (TSDF_array[i].empty()){
 			tri_add = marchingcubes_bodypart(voxels[i], voxel_size);
 		}
@@ -572,7 +679,12 @@ int main(int argc, char **argv)
 	//frame_win_height = win_height;
 	//frame_opengl_projection = opengl_projection.clone();
 
+	quadric = gluNewQuadric();
+	genFBO(fbo1);
+
 	glutMainLoop();
+
+	gluDeleteQuadric(quadric);
 
 	return 0;
 }
