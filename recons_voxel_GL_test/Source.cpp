@@ -28,10 +28,11 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 #include <gh_common.h>
 
 #include <fbolib.h>
+#include <octree.h>
 
 float zNear = 0.1, zFar = 10.0;
 
-#define MAX_SEARCH 10
+#define MAX_SEARCH 3
 
 #define USE_KINECT_INTRINSICS 1
 float ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0;
@@ -98,12 +99,120 @@ bool debug_shape_cylinders = false;
 
 std::string video_directory = "";
 std::string voxel_recons_path = "";
+std::string extension = ".xml.gz";
 int numframes = 10;
 bool skip_side = false;
 float tsdf_offset = 0;
 
 GLUquadric * quadric;
 FBO fbo1(1000,1000);
+
+std::vector<std::vector<cv::Vec3f>> bodypart_precalculated_rotation_vectors;
+
+
+void load_packaged_file(std::string filename,
+	BodyPartDefinitionVector& bpdv,
+	std::vector<FrameDataProcessed>& frame_datas,
+	BodypartFrameCluster& bodypart_frame_cluster,
+	std::vector<std::vector<float>>& triangle_vertices,
+	std::vector<std::vector<unsigned int>>& triangle_indices,
+	std::vector<VoxelMatrix>& voxels, float& voxel_size){
+
+	int win_width, win_height;
+
+	cv::FileStorage savefile;
+	savefile.open(filename, cv::FileStorage::READ);
+
+	cv::FileNode bpdNode = savefile["bodypartdefinitions"];
+	bpdv.clear();
+	for (auto it = bpdNode.begin(); it != bpdNode.end(); ++it)
+	{
+		BodyPartDefinition bpd;
+		read(*it, bpd);
+		bpdv.push_back(bpd);
+	}
+
+	cv::FileNode frameNode = savefile["frame_datas"];
+	frame_datas.clear();
+	for (auto it = frameNode.begin(); it != frameNode.end(); ++it){
+		cv::Mat camera_pose, camera_matrix;
+		SkeletonNodeHard root;
+		int facing;
+		(*it)["camera_extrinsic"] >> camera_pose;
+		(*it)["camera_intrinsic_mat"] >> camera_matrix;
+		(*it)["skeleton"] >> root;
+		(*it)["facing"] >> facing;
+		FrameDataProcessed frame_data(bpdv.size(), 0, 0, camera_matrix, camera_pose, root);
+		frame_data.mnFacing = facing;
+		frame_datas.push_back(frame_data);
+	}
+
+	cv::FileNode clusterNode = savefile["bodypart_frame_cluster"];
+	bodypart_frame_cluster.clear();
+	bodypart_frame_cluster.resize(bpdv.size());
+	for (auto it = clusterNode.begin(); it != clusterNode.end(); ++it){
+		int bodypart;
+		(*it)["bodypart"] >> bodypart;
+		cv::FileNode clusterClusterNode = (*it)["clusters"];
+		for (auto it2 = clusterClusterNode.begin(); it2 != clusterClusterNode.end(); ++it2){
+			int main_frame;
+			(*it2)["main_frame"] >> main_frame;
+			CroppedMat image;
+			(*it2)["image"] >> image;
+
+			std::vector<int> cluster;
+			cluster.push_back(main_frame);
+			bodypart_frame_cluster[bodypart].push_back(cluster);
+
+			frame_datas[main_frame].mBodyPartImages.resize(bpdv.size());
+			frame_datas[main_frame].mBodyPartImages[bodypart] = image;
+			win_width = image.mSize.width;
+			win_height = image.mSize.height;
+		}
+	}
+
+	cv::FileNode vertNode = savefile["triangle_vertices"];
+	triangle_vertices.clear();
+	for (auto it = vertNode.begin(); it != vertNode.end(); ++it){
+		triangle_vertices.push_back(std::vector<float>());
+		for (auto it2 = (*it).begin(); it2 != (*it).end(); ++it2){
+			float vert;
+			(*it2) >> vert;
+			triangle_vertices.back().push_back(vert);
+		}
+	}
+
+
+	cv::FileNode indNode = savefile["triangle_indices"];
+	triangle_indices.clear();
+	for (auto it = indNode.begin(); it != indNode.end(); ++it){
+		triangle_indices.push_back(std::vector<unsigned int>());
+		for (auto it2 = (*it).begin(); it2 != (*it).end(); ++it2){
+			int ind;
+			(*it2) >> ind;
+			triangle_indices.back().push_back(ind);
+		}
+	}
+
+	cv::FileNode voxNode = savefile["voxels"];
+	voxels.clear();
+	for (auto it = voxNode.begin(); it != voxNode.end(); ++it){
+		int width, height, depth;
+		(*it)["width"] >> width;
+		(*it)["height"] >> height;
+		(*it)["depth"] >> depth;
+		voxels.push_back(VoxelMatrix(width, height, depth));
+	}
+
+	savefile["voxel_size"] >> voxel_size;
+
+	savefile.release();
+
+	frame_datas[0].mWidth = win_width;
+	frame_datas[0].mHeight = win_height;
+}
+
+
 
 /* ---------------------------------------------------------------------------- */
 void reshape(int width, int height)
@@ -115,7 +224,12 @@ void reshape(int width, int height)
 
 	if (USE_KINECT_INTRINSICS){
 		int viewport[4];
-		cv::Mat proj_t = build_opengl_projection_for_intrinsics(viewport, -ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0+10, width, height, zNear, zFar).t(); //NOTE: ki_alpha is negative(for some reason openGL switches it). NOTE2: 10 is FUDGE
+		cv::Mat flip = cv::Mat::eye(4, 4, CV_32F);
+		//flip.ptr<float>(2)[2] = -1;
+		cv::Mat proj = flip * build_opengl_projection_for_intrinsics(viewport, -ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0+10, width, height, zNear, zFar, -1); //NOTE: ki_alpha is negative(for some reason openGL switches it). NOTE2: 10 is FUDGE
+		
+		cv::Mat proj_t = proj.t();
+
 		glMultMatrixf(proj_t.ptr<float>());
 
 		camera_matrix_current = cv::Mat::eye(4, 4, CV_32F);
@@ -267,6 +381,7 @@ void display(void)
 		anim_frame_f -= snhmaps.size();
 	}
 	anim_frame = anim_frame_f;
+	anim_frame %= snhmaps.size();
 	while (skip_side && frame_datas[anim_frame].mnFacing != FACING_FRONT && frame_datas[anim_frame].mnFacing != FACING_BACK){
 		++anim_frame_f; 
 		anim_frame = anim_frame_f;
@@ -305,8 +420,6 @@ void display(void)
 			cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose)).t();
 			glMultMatrixf(transform_t.ptr<float>());
 
-			glVertexPointer(3, GL_FLOAT, 0, triangle_vertices[i].data());
-			glColorPointer(3, GL_UNSIGNED_BYTE, 0, triangle_colors[i].data());
 			glColor3fv(bpdv[i].mColor);
 
 			renderCylinder(0, 0, 0, 0, voxels[i].height * voxel_size, 0, cylinders[i].width, 16, quadric);
@@ -345,12 +458,14 @@ void display(void)
 		std::vector<std::vector<cv::Point2i>> bodypart_pts_2d_v(bpdv.size());
 		for (int y = 0; y < win_height; ++y){
 			for (int x = 0; x < win_width; ++x){
-				cv::Vec3b orig_color = render_pretexture.ptr<cv::Vec3b>(y)[x];
+				cv::Vec3b& orig_color = render_pretexture.ptr<cv::Vec3b>(y)[x];
 				if (orig_color == bg_color) continue;
 				for (int i = 0; i < bpdv.size(); ++i){
-					cv::Vec3b bp_color(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
+					//cv::Vec3b bp_color(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
 
-					if (orig_color == bp_color
+					if (orig_color(0) == (unsigned char)(bpdv[i].mColor[0] * 0xff) &&
+						orig_color(1) == (unsigned char)(bpdv[i].mColor[1] * 0xff) &&
+						orig_color(2) == (unsigned char)(bpdv[i].mColor[2] * 0xff)
 						){
 						float depth = render_depth.ptr<float>(y)[x];
 						bodypart_pts_2d_withdepth_v[i].push_back(cv::Vec4f(depth*x, depth*y,
@@ -380,7 +495,7 @@ void display(void)
 			cv::Mat source_transform = transformation * get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose);
 
 			//unsigned int best_frame = find_best_frame(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
-			std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], source_transform, snhmaps, frame_datas, bodypart_frame_cluster[i]);
+			std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], source_transform, snhmaps, frame_datas, bodypart_precalculated_rotation_vectors[i], bodypart_frame_cluster[i]);
 
 
 			cv::Mat neutral_pts = (camera_matrix_current * source_transform).inv() * bodypart_pts;
@@ -395,13 +510,13 @@ void display(void)
 				//	std::cout << "head best frame: " << best_frame << "; actual frame: " << anim_frame << std::endl;
 				//}
 				cv::Mat target_transform = get_bodypart_transform(bpdv[i], snhmaps[best_frame], frame_datas[best_frame].mCameraPose);
-				cv::Mat bodypart_img_uncropped = uncrop_mat(frame_datas[best_frame].mBodyPartImages[i], cv::Vec3b(0xff, 0xff, 0xff));
+				//cv::Mat bodypart_img_uncropped = uncrop_mat(frame_datas[best_frame].mBodyPartImages[i], cv::Vec3b(0xff, 0xff, 0xff)); //uncrop is slow, just offset the cropped mat
 
 				cv::Mat neutral_pts_occluded;
 				std::vector<cv::Point2i> _2d_pts_occluded;
 
 				inverse_point_mapping(neutral_pts, bodypart_pts_2d_v[i], frame_datas[best_frame].mCameraMatrix, target_transform,
-					bodypart_img_uncropped, output_img, neutral_pts_occluded, _2d_pts_occluded, debug_inspect_texture_map);
+					frame_datas[best_frame].mBodyPartImages[i].mMat, frame_datas[best_frame].mBodyPartImages[i].mOffset, output_img, neutral_pts_occluded, _2d_pts_occluded, debug_inspect_texture_map);
 
 				neutral_pts = neutral_pts_occluded;
 				bodypart_pts_2d_v[i] = _2d_pts_occluded;
@@ -474,6 +589,8 @@ int main(int argc, char **argv)
 		fs["v"] >> ki_v0;
 	}
 
+	std::string packaged_file_path = "";
+
 	for (int i = 1; i < argc; ++i){
 		if (strcmp(argv[i], "-d") == 0){
 			video_directory = std::string(argv[i + 1]);
@@ -495,145 +612,158 @@ int main(int argc, char **argv)
 			tsdf_offset = atof(argv[i + 1]);
 			++i;
 		}
+		else if (strcmp(argv[i], "-e") == 0){
+			extension = std::string(argv[i + 1]);
+			++i;
+		}
+		else if (strcmp(argv[i], "-p") == 0){
+			packaged_file_path = std::string(argv[i + 1]);
+			++i;
+		}
 		else{
-			std::cout << "Options: -d [video directory] -v [voxel path] -n [num frames] -t [tsdf offset]\n"
-				<< "-s: skip non-front and back frames\n";
+			std::cout << "Options: -d [video directory] -v [voxel path] -n [num frames] -t [tsdf offset] -e [extension]\n"
+				<< "-s: skip non-front and back frames\n"
+				<<"-p: packaged file\n";
 			return 0;
 		}
 	}
 
-	if (video_directory == ""){
-		std::cout << "Specify video directory!\n";
-		return 0;
-	}
-
-	if (voxel_recons_path == ""){
-		std::cout << "Specify voxel path!\n";
-		return 0;
-	}
-
-	std::stringstream filenameSS;
-	int startframe = 0;
-	
-	cv::FileStorage fs;
-
-	filenameSS << video_directory << "/bodypartdefinitions.xml.gz";
-
-	fs.open(filenameSS.str(), cv::FileStorage::READ);
-	for (auto it = fs["bodypartdefinitions"].begin();
-		it != fs["bodypartdefinitions"].end();
-		++it){
-		BodyPartDefinition bpd;
-		read(*it, bpd);
-		bpdv.push_back(bpd);
-	}
-	fs.release();
-	std::vector<std::string> filenames;
-
-	for (int frame = startframe; frame < startframe + numframes; ++frame){
-		filenameSS.str("");
-		filenameSS << video_directory << "/" << frame << ".xml.gz";
-
-		filenames.push_back(filenameSS.str());
-
-	}
-
-	std::vector<cv::Mat> TSDF_array;
-	std::vector<cv::Mat> weight_array;
-
-	load_processed_frames(filenames, bpdv.size(), frame_datas, false);
-
-
-	std::vector<PointMap> pointmaps;
-
-	//load_frames(filenames, pointmaps, frame_datas_unprocessed);
-
-	for (int i = 0; i < frame_datas.size(); ++i){
-		snhmaps.push_back(SkeletonNodeHardMap());
-		cv_draw_and_build_skeleton(&frame_datas[i].mRoot, cv::Mat::eye(4,4,CV_32F), frame_datas[i].mCameraMatrix, frame_datas[i].mCameraPose, &snhmaps[i]);
-	}
-
-	cv::Vec4f center_pt(0,0,0,0);
-
-	for (int i = 0; i < bpdv.size(); ++i){
-		cv::Mat bp_pt_m = get_bodypart_transform(bpdv[i], snhmaps[0], frame_datas[0].mCameraPose)(cv::Range(0, 4), cv::Range(3, 4));
-		cv::Vec4f bp_pt = bp_pt_m;
-		center_pt += bp_pt;
-	}
-
-	center_pt /= center_pt(3);
-
-	model_center = cv::Mat::eye(4, 4, CV_32F);
-	cv::Mat(center_pt).copyTo(model_center(cv::Range(0, 4), cv::Range(3, 4)));
-	model_center_inv = model_center.inv();
-
-	//filenameSS.str("");
-	//filenameSS << video_directory << "/clusters.xml.gz";
-	//
-	//fs.open(filenameSS.str(), cv::FileStorage::READ);
-	//
-	//read(fs["bodypart_frame_clusters"], bodypart_frame_cluster);
-	//
-	//fs.release();
-
-	//bodypart_frame_cluster = cluster_frames(64, bpdv, snhmaps, frame_datas, 1000);
-	bodypart_frame_cluster.resize(bpdv.size());
-
-	load_voxels(voxel_recons_path, cylinders, voxels, TSDF_array, weight_array, voxel_size);
-
-	triangle_vertices.resize(bpdv.size());
-	triangle_indices.resize(bpdv.size());
-	triangle_colors.resize(bpdv.size());
-
-	double num_vertices = 0;
-
-	for (int i = 0; i < bpdv.size(); ++i){
-		std::vector<TRIANGLE> tri_add;
+	if (packaged_file_path == "")
+	{
 		
-		cv::add(tsdf_offset * cv::Mat::ones(TSDF_array[i].rows, TSDF_array[i].cols, CV_32F), TSDF_array[i], TSDF_array[i]);
-
-		if (TSDF_array[i].empty()){
-			tri_add = marchingcubes_bodypart(voxels[i], voxel_size);
+		if (video_directory == ""){
+			std::cout << "Specify video directory!\n";
+			return 0;
 		}
-		else{
-			tri_add = marchingcubes_bodypart(voxels[i], TSDF_array[i], voxel_size);
+		
+		if (voxel_recons_path == ""){
+			std::cout << "Specify voxel path!\n";
+			return 0;
 		}
-		std::vector<cv::Vec4f> vertices;
-		std::vector<unsigned int> vertex_indices;
-		for (int j = 0; j < tri_add.size(); ++j){
-			for (int k = 0; k < 3; ++k){
-				cv::Vec4f candidate_vertex = tri_add[j].p[k];
-				
-				bool vertices_contains_vertex = false;
-				int vertices_index;
-				for (int l = 0; l < vertices.size(); ++l){
-					if (vertices[l] == candidate_vertex){
-						vertices_contains_vertex = true;
-						vertices_index = l;
-						break;
+		
+		std::stringstream filenameSS;
+		int startframe = 0;
+		
+		cv::FileStorage fs;
+		
+		filenameSS << video_directory << "/bodypartdefinitions" << extension;
+		
+		fs.open(filenameSS.str(), cv::FileStorage::READ);
+		for (auto it = fs["bodypartdefinitions"].begin();
+			it != fs["bodypartdefinitions"].end();
+			++it){
+			BodyPartDefinition bpd;
+			read(*it, bpd);
+			bpdv.push_back(bpd);
+		}
+		fs.release();
+		std::vector<std::string> filenames;
+		
+		for (int frame = startframe; frame < startframe + numframes; ++frame){
+			filenameSS.str("");
+			filenameSS << video_directory << "/" << frame << extension;
+		
+			filenames.push_back(filenameSS.str());
+		
+		}
+		
+		std::vector<cv::Mat> TSDF_array;
+		std::vector<cv::Mat> weight_array;
+		
+		load_processed_frames(filenames, extension, bpdv.size(), frame_datas, false);
+		std::vector<PointMap> pointmaps;
+		
+		//load_frames(filenames, pointmaps, frame_datas_unprocessed);
+		
+		for (int i = 0; i < frame_datas.size(); ++i){
+			snhmaps.push_back(SkeletonNodeHardMap());
+			cv_draw_and_build_skeleton(&frame_datas[i].mRoot, cv::Mat::eye(4, 4, CV_32F), frame_datas[i].mCameraMatrix, frame_datas[i].mCameraPose, &snhmaps[i]);
+		}
+		
+		
+		//filenameSS.str("");
+		//filenameSS << video_directory << "/clusters.xml.gz";
+		//
+		//fs.open(filenameSS.str(), cv::FileStorage::READ);
+		//
+		//read(fs["bodypart_frame_clusters"], bodypart_frame_cluster);
+		//
+		//fs.release();
+		
+		bodypart_frame_cluster = cluster_frames(64, bpdv, snhmaps, frame_datas, 1000);
+		//bodypart_frame_cluster.resize(bpdv.size());
+		//bodypart_frame_cluster = cluster_frames_keyframes(15, bpdv, snhmaps, frame_datas);
+		
+		load_voxels(voxel_recons_path, cylinders, voxels, TSDF_array, weight_array, voxel_size);
+		
+		triangle_vertices.resize(bpdv.size());
+		triangle_indices.resize(bpdv.size());
+		triangle_colors.resize(bpdv.size());
+		
+		double num_vertices = 0;
+		
+		for (int i = 0; i < bpdv.size(); ++i){
+			std::vector<TRIANGLE> tri_add;
+		
+			cv::add(tsdf_offset * cv::Mat::ones(TSDF_array[i].rows, TSDF_array[i].cols, CV_32F), TSDF_array[i], TSDF_array[i]);
+		
+			if (TSDF_array[i].empty()){
+				tri_add = marchingcubes_bodypart(voxels[i], voxel_size);
+			}
+			else{
+				tri_add = marchingcubes_bodypart(voxels[i], TSDF_array[i], voxel_size);
+			}
+			std::vector<cv::Vec4f> vertices;
+			std::vector<unsigned int> vertex_indices;
+			for (int j = 0; j < tri_add.size(); ++j){
+				for (int k = 0; k < 3; ++k){
+					cv::Vec4f candidate_vertex = tri_add[j].p[k];
+		
+					bool vertices_contains_vertex = false;
+					int vertices_index;
+					for (int l = 0; l < vertices.size(); ++l){
+						if (vertices[l] == candidate_vertex){
+							vertices_contains_vertex = true;
+							vertices_index = l;
+							break;
+						}
 					}
+					if (!vertices_contains_vertex){
+						vertices.push_back(candidate_vertex);
+						vertices_index = vertices.size() - 1;
+					}
+					vertex_indices.push_back(vertices_index);
 				}
-				if (!vertices_contains_vertex){
-					vertices.push_back(candidate_vertex);
-					vertices_index = vertices.size() - 1;
-				}
-				vertex_indices.push_back(vertices_index);
+			}
+			triangle_vertices[i].reserve(vertices.size() * 3);
+			triangle_colors[i].reserve(vertices.size() * 3);
+			triangle_indices[i].reserve(vertex_indices.size());
+			for (int j = 0; j < vertices.size(); ++j){
+				triangle_vertices[i].push_back(vertices[j](0));
+				triangle_vertices[i].push_back(vertices[j](1));
+				triangle_vertices[i].push_back(vertices[j](2));
+				triangle_colors[i].push_back(bpdv[i].mColor[0] * 255);
+				triangle_colors[i].push_back(bpdv[i].mColor[1] * 255);
+				triangle_colors[i].push_back(bpdv[i].mColor[2] * 255);
+			}
+			num_vertices += vertices.size();
+			for (int j = 0; j < vertex_indices.size(); ++j){
+				triangle_indices[i].push_back(vertex_indices[j]);
 			}
 		}
-		triangle_vertices[i].reserve(vertices.size() * 3);
-		triangle_colors[i].reserve(vertices.size() * 3);
-		triangle_indices[i].reserve(vertex_indices.size());
-		for (int j = 0; j < vertices.size(); ++j){
-			triangle_vertices[i].push_back(vertices[j](0));
-			triangle_vertices[i].push_back(vertices[j](1));
-			triangle_vertices[i].push_back(vertices[j](2));
-			triangle_colors[i].push_back(bpdv[i].mColor[0]*255);
-			triangle_colors[i].push_back(bpdv[i].mColor[1]*255);
-			triangle_colors[i].push_back(bpdv[i].mColor[2]*255);
+	}
+	else
+	{
+		load_packaged_file(packaged_file_path, bpdv, frame_datas, bodypart_frame_cluster, triangle_vertices, triangle_indices, voxels, voxel_size);
+		triangle_colors.resize(bpdv.size());
+		for (int i = 0; i < bpdv.size(); ++i){
+			for (int j = 0; j < triangle_indices[i].size(); ++j){
+				triangle_colors[i].push_back(bpdv[i].mColor[0] * 0xff);
+			}
 		}
-		num_vertices += vertices.size();
-		for (int j = 0; j < vertex_indices.size(); ++j){
-			triangle_indices[i].push_back(vertex_indices[j]);
+		for (int i = 0; i < frame_datas.size(); ++i){
+			snhmaps.push_back(SkeletonNodeHardMap());
+			cv_draw_and_build_skeleton(&frame_datas[i].mRoot, cv::Mat::eye(4, 4, CV_32F), frame_datas[i].mCameraMatrix, frame_datas[i].mCameraPose, &snhmaps[i]);
 		}
 	}
 
@@ -653,8 +783,23 @@ int main(int argc, char **argv)
 	glutMotionFunc(mouseMoveFunc);
 	glutKeyboardUpFunc(keyboardFunc);
 
+	{
+		cv::Vec4f center_pt(0, 0, 0, 0);
 
-	glClearColor(0.1f, 0.3f, 0.3f, 1.f);
+		for (int i = 0; i < bpdv.size(); ++i){
+			cv::Mat bp_pt_m = get_bodypart_transform(bpdv[i], snhmaps[0], frame_datas[0].mCameraPose)(cv::Range(0, 4), cv::Range(3, 4));
+			cv::Vec4f bp_pt = bp_pt_m;
+			center_pt += bp_pt;
+		}
+
+		center_pt /= center_pt(3);
+
+		model_center = cv::Mat::eye(4, 4, CV_32F);
+		cv::Mat(center_pt).copyTo(model_center(cv::Range(0, 4), cv::Range(3, 4)));
+		model_center_inv = model_center.inv();
+	}
+
+	glClearColor(0.1f, 0.1f, 0.1f, 1.f);
 	bg_color = cv::Vec3b(0.1 * 0xff, 0.1 * 0xff, 0.1 * 0xff);
 	output_bg_color = cv::Scalar(0.1 * 0xff, 0.4 * 0xff, 0.3 * 0xff);
 
@@ -681,6 +826,11 @@ int main(int argc, char **argv)
 
 	quadric = gluNewQuadric();
 	genFBO(fbo1);
+
+	bodypart_precalculated_rotation_vectors.resize(bpdv.size());
+	for (int i = 0; i < bpdv.size(); ++i){
+		bodypart_precalculated_rotation_vectors[i] = precalculate_vecs(bpdv[i], snhmaps, frame_datas);
+	}
 
 	glutMainLoop();
 
