@@ -454,7 +454,11 @@ void display(void)
 	//debug
 	output << "bodypart_transform\n" << "[\n";
 
+	std::vector<cv::Vec3b> bodypart_color(bpdv.size());
+
 	for (int i = 0; i < bpdv.size(); ++i){
+		bodypart_color[i] = cv::Vec3b(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
+
 		glPushMatrix();
 
 		if (debug_shape_cylinders){
@@ -462,7 +466,7 @@ void display(void)
 			cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose)).t();
 			glMultMatrixf(transform_t.ptr<float>());
 
-			glColor3fv(bpdv[i].mColor);
+			glColor3ubv(&(bodypart_color[i][0]));
 
 			renderCylinder(0, 0, 0, 0, voxels[i].height * voxel_size, 0, cylinders[i].width, 16, quadric);
 
@@ -476,7 +480,7 @@ void display(void)
 
 			glVertexPointer(3, GL_FLOAT, 0, triangle_vertices[i].data());
 			glColorPointer(3, GL_UNSIGNED_BYTE, 0, triangle_colors[i].data());
-			glColor3fv(bpdv[i].mColor);
+			glColor3ubv(&(bodypart_color[i][0]));
 
 			glDrawElements(GL_TRIANGLES, triangle_indices[i].size(), GL_UNSIGNED_INT, triangle_indices[i].data());
 		}
@@ -511,9 +515,9 @@ void display(void)
 				for (int i = 0; i < bpdv.size(); ++i){
 					//cv::Vec3b bp_color(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
 
-					if (orig_color(0) == (unsigned char)(bpdv[i].mColor[0] * 0xff) &&
-						orig_color(1) == (unsigned char)(bpdv[i].mColor[1] * 0xff) &&
-						orig_color(2) == (unsigned char)(bpdv[i].mColor[2] * 0xff)
+					if (orig_color(0) == (unsigned char)(bodypart_color[i][0]) &&
+						orig_color(1) == (unsigned char)(bodypart_color[i][1]) &&
+						orig_color(2) == (unsigned char)(bodypart_color[i][2])
 						){
 						float depth = render_depth.ptr<float>(y)[x];
 						bodypart_pts_2d_withdepth_v[i].push_back(cv::Vec4f(depth*x, depth*y,
