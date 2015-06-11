@@ -15,7 +15,6 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 
 #include <opencv2\opencv.hpp>
 
-#include <AssimpOpenGL.h>
 #include <recons_common.h>
 #include <ReconsVoxel.h>
 
@@ -28,7 +27,6 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 #include <gh_common.h>
 
 #include <fbolib.h>
-#include <octree.h>
 
 float zNear = 0.1, zFar = 10.0;
 

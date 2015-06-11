@@ -43,7 +43,6 @@
     <Import Project="$(PROPERTY_SHEETS_DIR)\GLEW_debug.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\OpenGL.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\FBOLIB_debug.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\octree.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -57,7 +56,6 @@
     <Import Project="$(PROPERTY_SHEETS_DIR)\GHOSTLIB.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\GLEW.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\FBOLIB.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\octree.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
