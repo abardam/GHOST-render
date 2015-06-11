@@ -30,6 +30,12 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 #include <fbolib.h>
 #include <octree.h>
 
+#include <ctime>
+
+#define NOMINMAX
+#include <Windows.h>
+#include <fstream>
+
 float zNear = 0.1, zFar = 10.0;
 
 #define MAX_SEARCH 3
@@ -108,6 +114,20 @@ GLUquadric * quadric;
 FBO fbo1(1000,1000);
 
 std::vector<std::vector<cv::Vec3f>> bodypart_precalculated_rotation_vectors;
+
+std::string debug_print_dir;
+int debug_ki_alpha_shiz = -1;
+
+std::string generate_debug_print_dir(){
+	std::time_t time = std::time(nullptr);
+	std::tm ltime;
+	localtime_s(&ltime, &time);
+	std::stringstream ss;
+
+	ss << "debug-RVGT-" << ltime.tm_year << ltime.tm_mon << ltime.tm_mday << ltime.tm_hour << ltime.tm_min;
+	return ss.str();
+}
+
 
 
 void load_packaged_file(std::string filename,
@@ -226,7 +246,7 @@ void reshape(int width, int height)
 		int viewport[4];
 		cv::Mat flip = cv::Mat::eye(4, 4, CV_32F);
 		//flip.ptr<float>(2)[2] = -1;
-		cv::Mat proj = flip * build_opengl_projection_for_intrinsics(viewport, -ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0+10, width, height, zNear, zFar, -1); //NOTE: ki_alpha is negative(for some reason openGL switches it). NOTE2: 10 is FUDGE
+		cv::Mat proj = flip * build_opengl_projection_for_intrinsics(viewport, debug_ki_alpha_shiz * ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0+10, width, height, zNear, zFar, -1); //NOTE: ki_alpha is negative(for some reason openGL switches it). NOTE2: 10 is FUDGE
 		
 		cv::Mat proj_t = proj.t();
 
@@ -238,6 +258,15 @@ void reshape(int width, int height)
 		camera_matrix_current.ptr<float>(0)[1] = ki_gamma;
 		camera_matrix_current.ptr<float>(0)[2] = ki_u0;
 		camera_matrix_current.ptr<float>(1)[2] = ki_v0;
+
+		//debug
+		static int projn = 0;
+		std::stringstream debug_ss;
+		debug_ss << debug_print_dir << "/projection" << projn++ << ".txt";
+		std::ofstream output(debug_ss.str());
+		output << "projection\n" << proj << std::endl;
+		output << "camera_matrix_current\n" << camera_matrix_current << std::endl;
+		output.close();
 	}
 	else{
 		gluPerspective(fieldOfView, aspectRatio,
@@ -331,17 +360,20 @@ void keyboardFunc(unsigned char key, int x, int y){
 	if (key == 'i'){
 		debug_inspect_texture_map = !debug_inspect_texture_map;
 	}
-	if (key == 't'){
+	else if (key == 't'){
 		debug_draw_texture = !debug_draw_texture;
 	}
-	if (key == 's'){
+	else if (key == 's'){
 		debug_draw_skeleton = !debug_draw_skeleton;
 	}
-	if (key == 'p'){
+	else if (key == 'p'){
 		playing = !playing;
 	}
-	if (key == 'c'){
+	else if (key == 'c'){
 		debug_shape_cylinders = !debug_shape_cylinders;
+	}
+	else if (key == 'a'){
+		debug_ki_alpha_shiz *= -1;
 	}
 }
 
@@ -376,6 +408,12 @@ void display(void)
 	//
 	//}
 
+	unsigned int timestamp = std::time(nullptr);
+	std::stringstream debug_ss;
+	debug_ss << debug_print_dir << "/" << "debug" << timestamp << ".txt";
+	std::ofstream output;
+	output.open(debug_ss.str());
+
 	anim_frame_f += (elapsed_time * ANIM_DEFAULT_FPS / 1000.f);
 	if (anim_frame_f >= snhmaps.size()){
 		anim_frame_f -= snhmaps.size();
@@ -404,6 +442,9 @@ void display(void)
 	{
 		cv::Mat transformation_t = transformation.t();
 		glMultMatrixf(transformation_t.ptr<float>());
+
+		//debug
+		output << "transformation\n" << transformation << std::endl;
 	}
 
 	glEnableClientState(GL_VERTEX_ARRAY);
@@ -411,6 +452,9 @@ void display(void)
 	//glEnable(GL_COLOR_MATERIAL);
 	//glEnable(GL_BLEND);
 	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+	//debug
+	output << "bodypart_transform\n" << "[\n";
 
 	for (int i = 0; i < bpdv.size(); ++i){
 		glPushMatrix();
@@ -429,6 +473,9 @@ void display(void)
 			cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose) * get_voxel_transform(voxels[i].width, voxels[i].height, voxels[i].depth, voxel_size)).t();
 			glMultMatrixf(transform_t.ptr<float>());
 
+			//debug
+			output << transform_t.t() << "\n";
+
 			glVertexPointer(3, GL_FLOAT, 0, triangle_vertices[i].data());
 			glColorPointer(3, GL_UNSIGNED_BYTE, 0, triangle_colors[i].data());
 			glColor3fv(bpdv[i].mColor);
@@ -438,6 +485,9 @@ void display(void)
 
 		glPopMatrix();
 	}
+
+	//debug
+	output << "]\n";
 
 	glDisableClientState(GL_VERTEX_ARRAY);
 
@@ -531,6 +581,15 @@ void display(void)
 		//now display the rendered pts
 		display_mat(output_img_flip, true);
 	}
+	else{
+
+		cv::Mat render_pretexture = gl_read_color(win_width, win_height);
+		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+		cv::Mat render_pretexture_flip;
+		cv::flip(render_pretexture, render_pretexture_flip, 0);
+		display_mat(render_pretexture_flip, true);
+	}
 
 	if (debug_draw_skeleton){
 
@@ -567,6 +626,9 @@ void display(void)
 	glutSwapBuffers();
 	do_motion();
 
+	//debug
+	output.close();
+
 
 	//frame_win_width = win_width;
 	//frame_win_height = win_height;
@@ -578,6 +640,8 @@ void display(void)
 int main(int argc, char **argv)
 {
 
+	debug_print_dir = generate_debug_print_dir();
+	CreateDirectory(debug_print_dir.c_str(), nullptr);
 
 	if (USE_KINECT_INTRINSICS){
 		cv::FileStorage fs;
