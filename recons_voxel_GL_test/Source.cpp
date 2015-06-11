@@ -231,53 +231,61 @@ void load_packaged_file(std::string filename,
 }
 
 
-
 /* ---------------------------------------------------------------------------- */
 void reshape(int width, int height)
 {
-	const double aspectRatio = (float)width / height, fieldOfView = fovy;
-
-	glMatrixMode(GL_PROJECTION);
-	glLoadIdentity();
-
-	if (USE_KINECT_INTRINSICS){
-		int viewport[4];
-		cv::Mat flip = cv::Mat::eye(4, 4, CV_32F);
-		//flip.ptr<float>(2)[2] = -1;
-		cv::Mat proj = flip * build_opengl_projection_for_intrinsics(viewport, debug_ki_alpha_shiz * ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0+10, width, height, zNear, zFar, -1); //NOTE: ki_alpha is negative(for some reason openGL switches it). NOTE2: 10 is FUDGE
-		
-		cv::Mat proj_t = proj.t();
-
-		glMultMatrixf(proj_t.ptr<float>());
-
-		camera_matrix_current = cv::Mat::eye(4, 4, CV_32F);
-		camera_matrix_current.ptr<float>(0)[0] = ki_alpha;
-		camera_matrix_current.ptr<float>(1)[1] = ki_beta;
-		camera_matrix_current.ptr<float>(0)[1] = ki_gamma;
-		camera_matrix_current.ptr<float>(0)[2] = ki_u0;
-		camera_matrix_current.ptr<float>(1)[2] = ki_v0;
-
-		//debug
-		static int projn = 0;
-		std::stringstream debug_ss;
-		debug_ss << debug_print_dir << "/projection" << projn++ << ".txt";
-		std::ofstream output(debug_ss.str());
-		output << "projection\n" << proj << std::endl;
-		output << "camera_matrix_current\n" << camera_matrix_current << std::endl;
-		output.close();
-	}
-	else{
-		gluPerspective(fieldOfView, aspectRatio,
-			zNear, zFar);  /* Znear and Zfar */
-		camera_matrix_current = generate_camera_intrinsic(width, height, fovy);
-	}
+	//const double aspectRatio = (float)width / height, fieldOfView = fovy;
+	//
+	//glMatrixMode(GL_PROJECTION);
+	//glLoadIdentity();
+	//
+	//if (USE_KINECT_INTRINSICS){
+	//	int viewport[4];
+	//	cv::Mat proj_t = build_opengl_projection_for_intrinsics(viewport, -ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0+10, width, height, zNear, zFar, -1).t(); //note: ki_alpha is negative. NOTE2: the +10 is FUDGE
+	//	glMultMatrixf(proj_t.ptr<float>());
+	//}
+	//else{
+	//	gluPerspective(fieldOfView, aspectRatio,
+	//		zNear, zFar);  /* Znear and Zfar */
+	//}
 	glViewport(0, 0, width, height);
 	win_width = width;
 	win_height = height;
 
+	//opengl_projection.create(4, 4, CV_32F);
+	//glGetFloatv(GL_PROJECTION_MATRIX, (GLfloat*)opengl_projection.data);
+	//opengl_projection = opengl_projection.t();
+}
+
+void set_projection_matrix(cv::Mat camera_matrix){
+	glMatrixMode(GL_PROJECTION);
+	glLoadIdentity();
+
+	float ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0;
+	ki_alpha = camera_matrix.ptr<float>(0)[0];
+	ki_beta = camera_matrix.ptr<float>(1)[1];
+	ki_gamma = camera_matrix.ptr<float>(0)[1];
+	ki_u0 = camera_matrix.ptr<float>(0)[2];
+	ki_v0 = camera_matrix.ptr<float>(1)[2];
+	int viewport[4];
+	cv::Mat proj_t = build_opengl_projection_for_intrinsics_2(viewport, -ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0 + 10, win_width, win_height, zNear, zFar).t(); //im not proud of this
+	glMultMatrixf(proj_t.ptr<float>());
+
+
+	glViewport(0, 0, win_width, win_height);
+
 	opengl_projection.create(4, 4, CV_32F);
 	glGetFloatv(GL_PROJECTION_MATRIX, (GLfloat*)opengl_projection.data);
 	opengl_projection = opengl_projection.t();
+
+	//debug
+	static int projn = 0;
+	std::stringstream debug_ss;
+	debug_ss << debug_print_dir << "/projection" << projn++ << ".txt";
+	std::ofstream output(debug_ss.str());
+	output << "projection\n" << proj_t.t() << std::endl;
+	output << "camera_matrix_current\n" << camera_matrix << std::endl;
+	output.close();
 }
 
 /* ---------------------------------------------------------------------------- */
@@ -428,6 +436,8 @@ void display(void)
 
 	anim_frame %= snhmaps.size();
 
+	set_projection_matrix(frame_datas[anim_frame].mCameraMatrix);
+
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -546,11 +556,13 @@ void display(void)
 
 			cv::Mat source_transform = transformation * get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose);
 
+			cv::Mat flip_x = cv::Mat::eye(4, 4, CV_32F);
+			//flip_x.ptr<float>(0)[0] = -1;
 			//unsigned int best_frame = find_best_frame(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
-			std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], source_transform, snhmaps, frame_datas, bodypart_precalculated_rotation_vectors[i], bodypart_frame_cluster[i]);
+			std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], flip_x * source_transform, snhmaps, frame_datas, bodypart_precalculated_rotation_vectors[i], bodypart_frame_cluster[i]);
 
 
-			cv::Mat neutral_pts = (camera_matrix_current * source_transform).inv() * bodypart_pts;
+			cv::Mat neutral_pts = (frame_datas[anim_frame].mCameraMatrix * source_transform).inv() * bodypart_pts;
 
 			int search_limit = std::min((int)best_frames.size(), MAX_SEARCH);
 
