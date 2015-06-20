@@ -36,7 +36,9 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 
 float zNear = 0.1, zFar = 10.0;
 
-#define MAX_SEARCH 3
+#define MAX_SEARCH 64
+
+#define DEBUG_OUTPUT_TEXTURE 0
 
 #define USE_KINECT_INTRINSICS 1
 float ki_alpha, ki_beta, ki_gamma, ki_u0, ki_v0;
@@ -136,8 +138,6 @@ void load_packaged_file(std::string filename,
 	std::vector<std::vector<unsigned int>>& triangle_indices,
 	std::vector<VoxelMatrix>& voxels, float& voxel_size){
 
-	int win_width, win_height;
-
 	cv::FileStorage savefile;
 	savefile.open(filename, cv::FileStorage::READ);
 
@@ -175,17 +175,29 @@ void load_packaged_file(std::string filename,
 		for (auto it2 = clusterClusterNode.begin(); it2 != clusterClusterNode.end(); ++it2){
 			int main_frame;
 			(*it2)["main_frame"] >> main_frame;
-			CroppedMat image;
-			(*it2)["image"] >> image;
 
-			std::vector<int> cluster;
-			cluster.push_back(main_frame);
-			bodypart_frame_cluster[bodypart].push_back(cluster);
+			CroppedMat image;
+			if ((*it2)["image"].empty()){
+				std::string image_path;
+				(*it2)["image_path"] >> image_path;
+				image.mMat = cv::imread(image_path);
+
+				if (image.mMat.empty()) continue;
+				(*it2)["image_offset"] >> image.mOffset;
+				(*it2)["image_size"] >> image.mSize;
+
+				win_width = image.mSize.width;
+				win_height = image.mSize.height;
+			}
+			else{
+				(*it2)["image"] >> image;
+			}
 
 			frame_datas[main_frame].mBodyPartImages.resize(bpdv.size());
 			frame_datas[main_frame].mBodyPartImages[bodypart] = image;
-			win_width = image.mSize.width;
-			win_height = image.mSize.height;
+			std::vector<int> cluster;
+			cluster.push_back(main_frame);
+			bodypart_frame_cluster[bodypart].push_back(cluster);
 		}
 	}
 
@@ -278,14 +290,6 @@ void set_projection_matrix(cv::Mat camera_matrix){
 	glGetFloatv(GL_PROJECTION_MATRIX, (GLfloat*)opengl_projection.data);
 	opengl_projection = opengl_projection.t();
 
-	//debug
-	static int projn = 0;
-	std::stringstream debug_ss;
-	debug_ss << debug_print_dir << "/projection" << projn++ << ".txt";
-	std::ofstream output(debug_ss.str());
-	output << "projection\n" << proj_t.t() << std::endl;
-	output << "camera_matrix_current\n" << camera_matrix << std::endl;
-	output.close();
 }
 
 /* ---------------------------------------------------------------------------- */
@@ -417,8 +421,8 @@ void display(void)
 	unsigned int timestamp = std::time(nullptr);
 	std::stringstream debug_ss;
 	debug_ss << debug_print_dir << "/" << "debug" << timestamp << ".txt";
-	std::ofstream output;
-	output.open(debug_ss.str());
+	//std::ofstream output;
+	//output.open(debug_ss.str());
 
 	anim_frame_f += (elapsed_time * ANIM_DEFAULT_FPS / 1000.f);
 	if (anim_frame_f >= snhmaps.size()){
@@ -446,13 +450,13 @@ void display(void)
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
-	cv::Mat transformation = model_center * opengl_modelview * model_center_inv;
+	cv::Mat flip_x = cv::Mat::eye(4, 4, CV_32F);
+	flip_x.ptr<float>(0)[0] = -1;
+	cv::Mat transformation = flip_x * model_center * opengl_modelview * model_center_inv;
 	{
 		cv::Mat transformation_t = transformation.t();
 		glMultMatrixf(transformation_t.ptr<float>());
 
-		//debug
-		output << "transformation\n" << transformation << std::endl;
 	}
 
 	glEnableClientState(GL_VERTEX_ARRAY);
@@ -460,9 +464,6 @@ void display(void)
 	//glEnable(GL_COLOR_MATERIAL);
 	//glEnable(GL_BLEND);
 	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-	//debug
-	output << "bodypart_transform\n" << "[\n";
 
 	std::vector<cv::Vec3b> bodypart_color(bpdv.size());
 
@@ -485,9 +486,6 @@ void display(void)
 			cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose) * get_voxel_transform(voxels[i].width, voxels[i].height, voxels[i].depth, voxel_size)).t();
 			glMultMatrixf(transform_t.ptr<float>());
 
-			//debug
-			output << transform_t.t() << "\n";
-
 			glVertexPointer(3, GL_FLOAT, 0, triangle_vertices[i].data());
 			glColorPointer(3, GL_UNSIGNED_BYTE, 0, triangle_colors[i].data());
 			glColor3ubv(&(bodypart_color[i][0]));
@@ -498,8 +496,6 @@ void display(void)
 		glPopMatrix();
 	}
 
-	//debug
-	output << "]\n";
 
 	glDisableClientState(GL_VERTEX_ARRAY);
 
@@ -512,7 +508,13 @@ void display(void)
 		glPixelStorei(GL_PACK_ALIGNMENT, 1);
 
 		cv::Mat render_pretexture = gl_read_color(win_width, win_height);
-		//cv::imwrite("renpre.png", render_pretexture);
+
+#if DEBUG_OUTPUT_TEXTURE
+		//debug
+		debug_ss.str("");
+		debug_ss << debug_print_dir << "/texture-time" << timestamp << ".png";
+		cv::imwrite(debug_ss.str(), render_pretexture);
+#endif
 
 		cv::Mat render_depth = gl_read_depth(win_width, win_height, opengl_projection);
 
@@ -556,17 +558,40 @@ void display(void)
 
 			cv::Mat source_transform = transformation * get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose);
 
-			cv::Mat flip_x = cv::Mat::eye(4, 4, CV_32F);
+			//cv::Mat flip_x = cv::Mat::eye(4, 4, CV_32F);
 			//flip_x.ptr<float>(0)[0] = -1;
 			//unsigned int best_frame = find_best_frame(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
 			std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], flip_x * source_transform, snhmaps, frame_datas, bodypart_precalculated_rotation_vectors[i], bodypart_frame_cluster[i]);
-
 
 			cv::Mat neutral_pts = (frame_datas[anim_frame].mCameraMatrix * source_transform).inv() * bodypart_pts;
 
 			int search_limit = std::min((int)best_frames.size(), MAX_SEARCH);
 
-			for (int best_frames_it = 0; best_frames_it < best_frames.size() && !neutral_pts.empty(); ++best_frames_it){
+#if DEBUG_OUTPUT_TEXTURE
+			std::ofstream of;
+			debug_ss.str("");
+			debug_ss << debug_print_dir << "/texture-time" << timestamp << "-bp" << i << ".txt";
+			of.open(debug_ss.str());
+			const cv::Mat& cmp_rot_only = source_transform(cv::Range(0, 3), cv::Range(0, 3));
+			cv::Vec3f cmp_rot_vec;
+			cv::Rodrigues(cmp_rot_only, cmp_rot_vec);
+			of << "input: " << cmp_rot_vec(0) << " " << cmp_rot_vec(1) << " " << cmp_rot_vec(2) << std::endl;
+
+			//debug
+			for (int it = 0; it < search_limit; ++it){
+				debug_ss.str("");
+				debug_ss << debug_print_dir << "/texture-time" << timestamp << "-bp" << i << "-rank" << it << ".png";
+				cv::imwrite(debug_ss.str(), frame_datas[best_frames[it]].mBodyPartImages[i].mMat);
+				of << "frame " << best_frames[it] << ": " << bodypart_precalculated_rotation_vectors[i][best_frames[it]](0)
+					<< " " << bodypart_precalculated_rotation_vectors[i][best_frames[it]](1)
+					<< " " << bodypart_precalculated_rotation_vectors[i][best_frames[it]](2)
+					<< std::endl;
+			}
+
+			of.close();
+#endif
+
+			for (int best_frames_it = 0; best_frames_it < search_limit && !neutral_pts.empty(); ++best_frames_it){
 
 				unsigned int best_frame = best_frames[best_frames_it];
 
@@ -594,6 +619,12 @@ void display(void)
 
 		//now display the rendered pts
 		display_mat(output_img_flip, true);
+
+#if DEBUG_OUTPUT_TEXTURE
+		debug_ss.str("");
+		debug_ss << debug_print_dir << "/texture-time" << timestamp << "-render.png";
+		cv::imwrite(debug_ss.str(), output_img_flip);
+#endif
 	}
 	else{
 
@@ -641,7 +672,7 @@ void display(void)
 	do_motion();
 
 	//debug
-	output.close();
+	//output.close();
 
 
 	//frame_win_width = win_width;
@@ -768,7 +799,7 @@ int main(int argc, char **argv)
 		//
 		//fs.release();
 		
-		bodypart_frame_cluster = cluster_frames(64, bpdv, snhmaps, frame_datas, 1000);
+		bodypart_frame_cluster = cluster_frames(64, bpdv, snhmaps, frame_datas, 5000);
 		//bodypart_frame_cluster.resize(bpdv.size());
 		//bodypart_frame_cluster = cluster_frames_keyframes(15, bpdv, snhmaps, frame_datas);
 		
