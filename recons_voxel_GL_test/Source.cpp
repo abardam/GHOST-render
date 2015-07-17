@@ -25,6 +25,7 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 #include <gh_render.h>
 #include <gh_search.h>
 #include <gh_common.h>
+#include <gh_texture.h>
 
 #include <fbolib.h>
 
@@ -34,9 +35,15 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 #include <Windows.h>
 #include <fstream>
 
+#define VIEW_DEPENDENT_TEXTURE 0
+#define TEXTURE_MAP_CYLINDER 1
+#define TEXTURE_MAP_TRIANGLES 0
+
 float zNear = 0.1, zFar = 10.0;
 
-#define MAX_SEARCH 64
+#define MAX_SEARCH 16
+#define FILL_LIMIT 16
+#define FILL_NEIGHBORHOOD 5
 
 #define DEBUG_OUTPUT_TEXTURE 0
 
@@ -79,6 +86,9 @@ float anim_frame_f = 0;
 std::vector<std::vector<float>> triangle_vertices;
 std::vector<std::vector<unsigned int>> triangle_indices;
 std::vector<std::vector<unsigned char>> triangle_colors;
+std::vector<std::vector<float>> triangle_texcoords;
+
+std::vector<GLuint> bodypart_texture;
 
 BodyPartDefinitionVector bpdv;
 std::vector<SkeletonNodeHardMap> snhmaps;
@@ -102,6 +112,7 @@ bool debug_draw_texture = true;
 bool debug_draw_skeleton = true;
 bool playing = true;
 bool debug_shape_cylinders = false;
+bool debug_show_normals = false;
 
 std::string video_directory = "";
 std::string voxel_recons_path = "";
@@ -127,121 +138,6 @@ std::string generate_debug_print_dir(){
 	ss << "debug-RVGT-" << ltime.tm_year << ltime.tm_mon << ltime.tm_mday << ltime.tm_hour << ltime.tm_min;
 	return ss.str();
 }
-
-
-
-void load_packaged_file(std::string filename,
-	BodyPartDefinitionVector& bpdv,
-	std::vector<FrameDataProcessed>& frame_datas,
-	BodypartFrameCluster& bodypart_frame_cluster,
-	std::vector<std::vector<float>>& triangle_vertices,
-	std::vector<std::vector<unsigned int>>& triangle_indices,
-	std::vector<VoxelMatrix>& voxels, float& voxel_size){
-
-	cv::FileStorage savefile;
-	savefile.open(filename, cv::FileStorage::READ);
-
-	cv::FileNode bpdNode = savefile["bodypartdefinitions"];
-	bpdv.clear();
-	for (auto it = bpdNode.begin(); it != bpdNode.end(); ++it)
-	{
-		BodyPartDefinition bpd;
-		read(*it, bpd);
-		bpdv.push_back(bpd);
-	}
-
-	cv::FileNode frameNode = savefile["frame_datas"];
-	frame_datas.clear();
-	for (auto it = frameNode.begin(); it != frameNode.end(); ++it){
-		cv::Mat camera_pose, camera_matrix;
-		SkeletonNodeHard root;
-		int facing;
-		(*it)["camera_extrinsic"] >> camera_pose;
-		(*it)["camera_intrinsic_mat"] >> camera_matrix;
-		(*it)["skeleton"] >> root;
-		(*it)["facing"] >> facing;
-		FrameDataProcessed frame_data(bpdv.size(), 0, 0, camera_matrix, camera_pose, root);
-		frame_data.mnFacing = facing;
-		frame_datas.push_back(frame_data);
-	}
-
-	cv::FileNode clusterNode = savefile["bodypart_frame_cluster"];
-	bodypart_frame_cluster.clear();
-	bodypart_frame_cluster.resize(bpdv.size());
-	for (auto it = clusterNode.begin(); it != clusterNode.end(); ++it){
-		int bodypart;
-		(*it)["bodypart"] >> bodypart;
-		cv::FileNode clusterClusterNode = (*it)["clusters"];
-		for (auto it2 = clusterClusterNode.begin(); it2 != clusterClusterNode.end(); ++it2){
-			int main_frame;
-			(*it2)["main_frame"] >> main_frame;
-
-			CroppedMat image;
-			if ((*it2)["image"].empty()){
-				std::string image_path;
-				(*it2)["image_path"] >> image_path;
-				image.mMat = cv::imread(image_path);
-
-				if (image.mMat.empty()) continue;
-				(*it2)["image_offset"] >> image.mOffset;
-				(*it2)["image_size"] >> image.mSize;
-
-				win_width = image.mSize.width;
-				win_height = image.mSize.height;
-			}
-			else{
-				(*it2)["image"] >> image;
-			}
-
-			frame_datas[main_frame].mBodyPartImages.resize(bpdv.size());
-			frame_datas[main_frame].mBodyPartImages[bodypart] = image;
-			std::vector<int> cluster;
-			cluster.push_back(main_frame);
-			bodypart_frame_cluster[bodypart].push_back(cluster);
-		}
-	}
-
-	cv::FileNode vertNode = savefile["triangle_vertices"];
-	triangle_vertices.clear();
-	for (auto it = vertNode.begin(); it != vertNode.end(); ++it){
-		triangle_vertices.push_back(std::vector<float>());
-		for (auto it2 = (*it).begin(); it2 != (*it).end(); ++it2){
-			float vert;
-			(*it2) >> vert;
-			triangle_vertices.back().push_back(vert);
-		}
-	}
-
-
-	cv::FileNode indNode = savefile["triangle_indices"];
-	triangle_indices.clear();
-	for (auto it = indNode.begin(); it != indNode.end(); ++it){
-		triangle_indices.push_back(std::vector<unsigned int>());
-		for (auto it2 = (*it).begin(); it2 != (*it).end(); ++it2){
-			int ind;
-			(*it2) >> ind;
-			triangle_indices.back().push_back(ind);
-		}
-	}
-
-	cv::FileNode voxNode = savefile["voxels"];
-	voxels.clear();
-	for (auto it = voxNode.begin(); it != voxNode.end(); ++it){
-		int width, height, depth;
-		(*it)["width"] >> width;
-		(*it)["height"] >> height;
-		(*it)["depth"] >> depth;
-		voxels.push_back(VoxelMatrix(width, height, depth));
-	}
-
-	savefile["voxel_size"] >> voxel_size;
-
-	savefile.release();
-
-	frame_datas[0].mWidth = win_width;
-	frame_datas[0].mHeight = win_height;
-}
-
 
 /* ---------------------------------------------------------------------------- */
 void reshape(int width, int height)
@@ -385,6 +281,9 @@ void keyboardFunc(unsigned char key, int x, int y){
 	else if (key == 'a'){
 		debug_ki_alpha_shiz *= -1;
 	}
+	else if (key == 'n'){
+		debug_show_normals = !debug_show_normals;
+	}
 }
 
 
@@ -451,7 +350,7 @@ void display(void)
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 	cv::Mat flip_x = cv::Mat::eye(4, 4, CV_32F);
-	flip_x.ptr<float>(0)[0] = -1;
+	//flip_x.ptr<float>(0)[0] = -1;
 	cv::Mat transformation = flip_x * model_center * opengl_modelview * model_center_inv;
 	{
 		cv::Mat transformation_t = transformation.t();
@@ -461,180 +360,293 @@ void display(void)
 
 	glEnableClientState(GL_VERTEX_ARRAY);
 
+#if VIEW_DEPENDENT_TEXTURES != 1
+#if TEXTURE_MAP_CYLINDER == 1
+	glEnableClientState(GL_COLOR_ARRAY);
+	glDisable(GL_TEXTURE_2D);
+#elif TEXTURE_MAP_TRIANGLES == 1
+	glEnableClientState(GL_TEXTURE_COORD_ARRAY);
+	glEnable(GL_TEXTURE_2D);
+#endif
+#endif
+
 	//glEnable(GL_COLOR_MATERIAL);
 	//glEnable(GL_BLEND);
 	//glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
 	std::vector<cv::Vec3b> bodypart_color(bpdv.size());
 
-	for (int i = 0; i < bpdv.size(); ++i){
-		bodypart_color[i] = cv::Vec3b(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
+	int start_bp = 0;
+	int bp_inc = debug_shape_cylinders?1:bpdv.size();
+	cv::Mat output_img(win_height, win_width, CV_8UC4, cv::Scalar(0.5 * 0xff, 0.5 * 0xff, 0.5 * 0xff, 0));
 
-		glPushMatrix();
+	glDisable(GL_LIGHTING);
 
-		if (debug_shape_cylinders){
+	for (start_bp; start_bp < bpdv.size(); start_bp += bp_inc){
+		int end_bp = start_bp + bp_inc;
+		for (int i = start_bp; i < end_bp; ++i){
+			bodypart_color[i] = cv::Vec3b(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
 
-			cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose)).t();
-			glMultMatrixf(transform_t.ptr<float>());
+			glPushMatrix();
 
-			glColor3ubv(&(bodypart_color[i][0]));
+			glBindTexture(GL_TEXTURE_2D, bodypart_texture[i]);
 
-			renderCylinder(0, 0, 0, 0, voxels[i].height * voxel_size, 0, cylinders[i].width, 16, quadric);
+			glColor3f(1, 1, 1);
+			if (debug_shape_cylinders){
 
-		}
-		else{
-			cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose) * get_voxel_transform(voxels[i].width, voxels[i].height, voxels[i].depth, voxel_size)).t();
-			glMultMatrixf(transform_t.ptr<float>());
+				cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose)).t();
+				glMultMatrixf(transform_t.ptr<float>());
 
-			glVertexPointer(3, GL_FLOAT, 0, triangle_vertices[i].data());
-			glColorPointer(3, GL_UNSIGNED_BYTE, 0, triangle_colors[i].data());
-			glColor3ubv(&(bodypart_color[i][0]));
+				glColor3ubv(&(bodypart_color[i][0]));
 
-			glDrawElements(GL_TRIANGLES, triangle_indices[i].size(), GL_UNSIGNED_INT, triangle_indices[i].data());
-		}
+				renderCylinder(0, 0, 0, 0, voxels[i].height * voxel_size, 0, cylinders[i].width, 16, quadric);
 
-		glPopMatrix();
-	}
+			}
+			else{
+				cv::Mat transform_t = (get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose) * get_voxel_transform(voxels[i].width, voxels[i].height, voxels[i].depth, voxel_size)).t();
+				glMultMatrixf(transform_t.ptr<float>());
 
-
-	glDisableClientState(GL_VERTEX_ARRAY);
-
-
-
-	//now take the different body part colors and map em to the proper textures
-
-	if (debug_draw_texture){
-
-		glPixelStorei(GL_PACK_ALIGNMENT, 1);
-
-		cv::Mat render_pretexture = gl_read_color(win_width, win_height);
-
-#if DEBUG_OUTPUT_TEXTURE
-		//debug
-		debug_ss.str("");
-		debug_ss << debug_print_dir << "/texture-time" << timestamp << ".png";
-		cv::imwrite(debug_ss.str(), render_pretexture);
+				glVertexPointer(3, GL_FLOAT, 0, triangle_vertices[i].data());
+#if VIEW_DEPENDENT_TEXTURE != 1
+#if TEXTURE_MAP_TRIANGLES == 1
+				glTexCoordPointer(2, GL_FLOAT, 0, triangle_texcoords[i].data());
+#elif TEXTURE_MAP_CYLINDER == 1
+				glColorPointer(3, GL_UNSIGNED_BYTE, 0, triangle_colors[i].data());
+#endif
+#else
+				glColor3ubv(&(bodypart_color[i][0]));
 #endif
 
-		cv::Mat render_depth = gl_read_depth(win_width, win_height, opengl_projection);
+				glDrawElements(GL_TRIANGLES, triangle_indices[i].size(), GL_UNSIGNED_INT, triangle_indices[i].data());
+			}
 
-		std::vector<std::vector<cv::Vec4f>> bodypart_pts_2d_withdepth_v(bpdv.size());
-		std::vector<std::vector<cv::Point2i>> bodypart_pts_2d_v(bpdv.size());
-		for (int y = 0; y < win_height; ++y){
-			for (int x = 0; x < win_width; ++x){
-				cv::Vec3b& orig_color = render_pretexture.ptr<cv::Vec3b>(y)[x];
-				if (orig_color == bg_color) continue;
-				for (int i = 0; i < bpdv.size(); ++i){
-					//cv::Vec3b bp_color(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
+			glPopMatrix();
+		}
 
-					if (orig_color(0) == (unsigned char)(bodypart_color[i][0]) &&
-						orig_color(1) == (unsigned char)(bodypart_color[i][1]) &&
-						orig_color(2) == (unsigned char)(bodypart_color[i][2])
-						){
-						float depth = render_depth.ptr<float>(y)[x];
-						bodypart_pts_2d_withdepth_v[i].push_back(cv::Vec4f(depth*x, depth*y,
-							depth, 1));
-						bodypart_pts_2d_v[i].push_back(cv::Point2i(x, y));
-						break;
+
+		glDisableClientState(GL_VERTEX_ARRAY);
+		//glDisableClientState(GL_TEXTURE_COORD_ARRAY);
+		glDisableClientState(GL_COLOR_ARRAY);
+
+
+
+		//now take the different body part colors and map em to the proper textures
+
+		if (debug_draw_texture && VIEW_DEPENDENT_TEXTURE){
+
+			glPixelStorei(GL_PACK_ALIGNMENT, 1);
+
+			cv::Mat render_pretexture = gl_read_color(win_width, win_height);
+
+			//shrink by 2 pix
+			//cv::Mat black_mask(render_pretexture.size(), CV_8U, cv::Scalar(0));
+			//for (int y = 0; y < render_pretexture.rows; ++y){
+			//	for (int x = 0; x < render_pretexture.cols; ++x){
+			//		if (render_pretexture.ptr<cv::Vec3b>(y)[x] == bg_color){
+			//			black_mask.ptr<unsigned char>(y)[x] = 0xff;
+			//		}
+			//	}
+			//}
+			//cv::Mat black_mask_dilate;
+			//cv::dilate(black_mask, black_mask_dilate, cv::getStructuringElement(cv::MORPH_CROSS, cv::Size(5, 5), cv::Point(2, 2)));
+			//for (int y = 0; y < render_pretexture.rows; ++y){
+			//	for (int x = 0; x < render_pretexture.cols; ++x){
+			//		if (black_mask_dilate.ptr<unsigned char>(y)[x] == 0xff){
+			//			render_pretexture.ptr<cv::Vec3b>(y)[x] = bg_color;
+			//		}
+			//	}
+			//}
+
+#if DEBUG_OUTPUT_TEXTURE
+			//debug
+			debug_ss.str("");
+			debug_ss << debug_print_dir << "/texture-time" << timestamp << ".png";
+			cv::imwrite(debug_ss.str(), render_pretexture);
+#endif
+
+			cv::Mat render_depth = gl_read_depth(win_width, win_height, opengl_projection);
+
+			if (debug_show_normals){
+				cv::Mat normal_img = draw_normals(render_depth, frame_datas[anim_frame].mCameraMatrix);
+
+				for (int y = 0; y < win_height; ++y){
+					for (int x = 0; x < win_width; ++x){
+						const cv::Vec3f& normal = normal_img.ptr<cv::Vec3f>(y)[x];
+						output_img.ptr<cv::Vec4b>(y)[x] = cv::Vec4b(normal(0) * 0xff, normal(1) * 0xff, normal(2) * 0xff, 0xff);
 					}
 				}
 			}
-		}
+			else{
+				std::vector<std::vector<cv::Vec4f>> bodypart_pts_2d_withdepth_v(bpdv.size());
+				std::vector<std::vector<cv::Point2i>> bodypart_pts_2d_v(bpdv.size());
+				for (int y = 0; y < win_height; ++y){
+					for (int x = 0; x < win_width; ++x){
+						cv::Vec3b& orig_color = render_pretexture.ptr<cv::Vec3b>(y)[x];
+						if (orig_color == bg_color) continue;
+						for (int i = 0; i < bpdv.size(); ++i){
+							//cv::Vec3b bp_color(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
 
-		cv::Mat output_img(win_height, win_width, CV_8UC4, cv::Scalar(0,0,0,0));
+							if (orig_color(0) == (unsigned char)(bodypart_color[i][0]) &&
+								orig_color(1) == (unsigned char)(bodypart_color[i][1]) &&
+								orig_color(2) == (unsigned char)(bodypart_color[i][2])
+								){
+								float depth = render_depth.ptr<float>(y)[x];
+								bodypart_pts_2d_withdepth_v[i].push_back(cv::Vec4f(depth*x, depth*y,
+									depth, 1));
+								bodypart_pts_2d_v[i].push_back(cv::Point2i(x, y));
+								break;
+							}
+						}
+					}
+				}
 
-		for (int i = 0; i < bpdv.size(); ++i){
 
-			if (bodypart_pts_2d_withdepth_v[i].size() == 0) continue;
+				for (int i = 0; i < bpdv.size(); ++i){
 
-			//convert the vector into a matrix
-			cv::Mat bodypart_pts = pointvec_to_pointmat(bodypart_pts_2d_withdepth_v[i]);
+					if (bodypart_pts_2d_withdepth_v[i].size() == 0) continue;
 
-			//now multiply the inverse bodypart transform + the bodypart transform for the best frame
-			//oh yeah, look for the best frame
-			//this should probably be in a different function, but how do i access it in display...?
-			//,maybe just global vars
+					//convert the vector into a matrix
+					cv::Mat bodypart_pts = pointvec_to_pointmat(bodypart_pts_2d_withdepth_v[i]);
+
+					//now multiply the inverse bodypart transform + the bodypart transform for the best frame
+					//oh yeah, look for the best frame
+					//this should probably be in a different function, but how do i access it in display...?
+					//,maybe just global vars
 
 
-			cv::Mat source_transform = transformation * get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose);
+					cv::Mat source_transform = transformation * get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose);
 
-			//cv::Mat flip_x = cv::Mat::eye(4, 4, CV_32F);
-			//flip_x.ptr<float>(0)[0] = -1;
-			//unsigned int best_frame = find_best_frame(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
-			std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], flip_x * source_transform, snhmaps, frame_datas, bodypart_precalculated_rotation_vectors[i], bodypart_frame_cluster[i]);
+					//cv::Mat flip_x = cv::Mat::eye(4, 4, CV_32F);
+					//flip_x.ptr<float>(0)[0] = -1;
+					//unsigned int best_frame = find_best_frame(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
+					std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], flip_x * source_transform, snhmaps, frame_datas, bodypart_precalculated_rotation_vectors[i], bodypart_frame_cluster[i]);
 
-			cv::Mat neutral_pts = (frame_datas[anim_frame].mCameraMatrix * source_transform).inv() * bodypart_pts;
+					cv::Mat neutral_pts = (frame_datas[anim_frame].mCameraMatrix * source_transform).inv() * bodypart_pts;
 
-			int search_limit = std::min((int)best_frames.size(), MAX_SEARCH);
+					int search_limit = std::min((int)best_frames.size(), MAX_SEARCH);
 
 #if DEBUG_OUTPUT_TEXTURE
-			std::ofstream of;
+					std::ofstream of;
+					debug_ss.str("");
+					debug_ss << debug_print_dir << "/texture-time" << timestamp << "-bp" << i << ".txt";
+					of.open(debug_ss.str());
+					const cv::Mat& cmp_rot_only = source_transform(cv::Range(0, 3), cv::Range(0, 3));
+					cv::Vec3f cmp_rot_vec;
+					cv::Rodrigues(cmp_rot_only, cmp_rot_vec);
+					of << "input: " << cmp_rot_vec(0) << " " << cmp_rot_vec(1) << " " << cmp_rot_vec(2) << std::endl;
+
+					//debug
+					for (int it = 0; it < search_limit; ++it){
+						debug_ss.str("");
+						debug_ss << debug_print_dir << "/texture-time" << timestamp << "-bp" << i << "-rank" << it << ".png";
+						cv::imwrite(debug_ss.str(), frame_datas[best_frames[it]].mBodyPartImages[i].mMat);
+						of << "frame " << best_frames[it] << ": " << bodypart_precalculated_rotation_vectors[i][best_frames[it]](0)
+							<< " " << bodypart_precalculated_rotation_vectors[i][best_frames[it]](1)
+							<< " " << bodypart_precalculated_rotation_vectors[i][best_frames[it]](2)
+							<< std::endl;
+					}
+
+					of.close();
+#endif
+
+					for (int best_frames_it = 0; best_frames_it < search_limit && !neutral_pts.empty(); ++best_frames_it){
+
+						unsigned int best_frame = best_frames[best_frames_it];
+
+						//if (bpdv[i].mBodyPartName == "HEAD"){
+						//	std::cout << "head best frame: " << best_frame << "; actual frame: " << anim_frame << std::endl;
+						//}
+						cv::Mat target_transform = get_bodypart_transform(bpdv[i], snhmaps[best_frame], frame_datas[best_frame].mCameraPose);
+						//cv::Mat bodypart_img_uncropped = uncrop_mat(frame_datas[best_frame].mBodyPartImages[i], cv::Vec3b(0xff, 0xff, 0xff)); //uncrop is slow, just offset the cropped mat
+
+						cv::Mat neutral_pts_occluded;
+						std::vector<cv::Point2i> _2d_pts_occluded;
+
+						inverse_point_mapping(neutral_pts, bodypart_pts_2d_v[i], frame_datas[best_frame].mCameraMatrix, target_transform,
+							frame_datas[best_frame].mBodyPartImages[i].mMat, frame_datas[best_frame].mBodyPartImages[i].mOffset, output_img, neutral_pts_occluded, _2d_pts_occluded, !debug_shape_cylinders, debug_inspect_texture_map);
+
+						neutral_pts = neutral_pts_occluded;
+						bodypart_pts_2d_v[i] = _2d_pts_occluded;
+					}
+
+					if (!bodypart_pts_2d_v[i].empty()){
+						bool up = true;
+
+						for (int iter = 0; iter < FILL_LIMIT && !bodypart_pts_2d_v[i].empty(); ++iter){
+
+							for (int _n = 0; _n < bodypart_pts_2d_v[i].size(); ++_n){
+
+								int n = up ? _n : bodypart_pts_2d_v[i].size() - _n - 1;
+
+								int npix = 0;
+								int px = bodypart_pts_2d_v[i][n].x;
+								int py = bodypart_pts_2d_v[i][n].y;
+
+								int av_b = 0, av_g = 0, av_r = 0;
+
+								for (int fx = -FILL_NEIGHBORHOOD; fx < FILL_NEIGHBORHOOD; ++fx){
+									for (int fy = -FILL_NEIGHBORHOOD; fy < FILL_NEIGHBORHOOD; ++fy){
+										int wx = px + fx;
+										int wy = py + fy;
+										if (CLAMP(wx, wy, output_img.cols, output_img.rows)){
+											const cv::Vec4b& color = output_img.ptr<cv::Vec4b>(wy)[wx];
+											if (color(3) > 0){
+												av_b += color(0);
+												av_g += color(1);
+												av_r += color(2);
+												++npix;
+											}
+										}
+									}
+								}
+
+								if (npix > 0){
+									av_b /= npix;
+									av_g /= npix;
+									av_r /= npix;
+
+									output_img.ptr<cv::Vec4b>(py)[px] = cv::Vec4b(av_b, av_g, av_r, 0xff);
+
+									bodypart_pts_2d_v[i].erase(bodypart_pts_2d_v[i].begin() + n);
+									--n;
+								}
+							}
+							up = !up;
+						}
+					}
+				}
+			}
+
+
+#if DEBUG_OUTPUT_TEXTURE
 			debug_ss.str("");
-			debug_ss << debug_print_dir << "/texture-time" << timestamp << "-bp" << i << ".txt";
-			of.open(debug_ss.str());
-			const cv::Mat& cmp_rot_only = source_transform(cv::Range(0, 3), cv::Range(0, 3));
-			cv::Vec3f cmp_rot_vec;
-			cv::Rodrigues(cmp_rot_only, cmp_rot_vec);
-			of << "input: " << cmp_rot_vec(0) << " " << cmp_rot_vec(1) << " " << cmp_rot_vec(2) << std::endl;
-
-			//debug
-			for (int it = 0; it < search_limit; ++it){
-				debug_ss.str("");
-				debug_ss << debug_print_dir << "/texture-time" << timestamp << "-bp" << i << "-rank" << it << ".png";
-				cv::imwrite(debug_ss.str(), frame_datas[best_frames[it]].mBodyPartImages[i].mMat);
-				of << "frame " << best_frames[it] << ": " << bodypart_precalculated_rotation_vectors[i][best_frames[it]](0)
-					<< " " << bodypart_precalculated_rotation_vectors[i][best_frames[it]](1)
-					<< " " << bodypart_precalculated_rotation_vectors[i][best_frames[it]](2)
-					<< std::endl;
-			}
-
-			of.close();
+			debug_ss << debug_print_dir << "/texture-time" << timestamp << "-render.png";
+			cv::imwrite(debug_ss.str(), output_img_flip);
 #endif
-
-			for (int best_frames_it = 0; best_frames_it < search_limit && !neutral_pts.empty(); ++best_frames_it){
-
-				unsigned int best_frame = best_frames[best_frames_it];
-
-				//if (bpdv[i].mBodyPartName == "HEAD"){
-				//	std::cout << "head best frame: " << best_frame << "; actual frame: " << anim_frame << std::endl;
-				//}
-				cv::Mat target_transform = get_bodypart_transform(bpdv[i], snhmaps[best_frame], frame_datas[best_frame].mCameraPose);
-				//cv::Mat bodypart_img_uncropped = uncrop_mat(frame_datas[best_frame].mBodyPartImages[i], cv::Vec3b(0xff, 0xff, 0xff)); //uncrop is slow, just offset the cropped mat
-
-				cv::Mat neutral_pts_occluded;
-				std::vector<cv::Point2i> _2d_pts_occluded;
-
-				inverse_point_mapping(neutral_pts, bodypart_pts_2d_v[i], frame_datas[best_frame].mCameraMatrix, target_transform,
-					frame_datas[best_frame].mBodyPartImages[i].mMat, frame_datas[best_frame].mBodyPartImages[i].mOffset, output_img, neutral_pts_occluded, _2d_pts_occluded, debug_inspect_texture_map);
-
-				neutral_pts = neutral_pts_occluded;
-				bodypart_pts_2d_v[i] = _2d_pts_occluded;
-			}
 		}
+		else{
 
-		cv::Mat output_img_flip;
-		cv::flip(output_img, output_img_flip, 0);
+			cv::Mat render_pretexture = gl_read_color(win_width, win_height);
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			//cv::Mat render_pretexture_flip;
+			//cv::flip(render_pretexture, render_pretexture_flip, 0);
+			//display_mat(render_pretexture_flip, true);
 
-		//now display the rendered pts
-		display_mat(output_img_flip, true);
-
-#if DEBUG_OUTPUT_TEXTURE
-		debug_ss.str("");
-		debug_ss << debug_print_dir << "/texture-time" << timestamp << "-render.png";
-		cv::imwrite(debug_ss.str(), output_img_flip);
-#endif
+			output_img = render_pretexture;
+		}
 	}
-	else{
 
-		cv::Mat render_pretexture = gl_read_color(win_width, win_height);
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-		cv::Mat render_pretexture_flip;
-		cv::flip(render_pretexture, render_pretexture_flip, 0);
-		display_mat(render_pretexture_flip, true);
-	}
+	cv::Mat output_img_flip;
+	cv::flip(output_img, output_img_flip, 0);
+
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	glClear(GL_COLOR);
+
+	//now display the rendered pts
+	display_mat(output_img_flip, true);
 
 	if (debug_draw_skeleton){
 
@@ -715,7 +727,6 @@ int main(int argc, char **argv)
 		}
 		else if (strcmp(argv[i], "-s") == 0){
 			skip_side = true;
-			++i;
 		}
 		else if (strcmp(argv[i], "-t") == 0){
 			tsdf_offset = atof(argv[i + 1]);
@@ -799,7 +810,7 @@ int main(int argc, char **argv)
 		//
 		//fs.release();
 		
-		bodypart_frame_cluster = cluster_frames(64, bpdv, snhmaps, frame_datas, 5000);
+		bodypart_frame_cluster = cluster_frames(64, bpdv, snhmaps, frame_datas, 50);
 		//bodypart_frame_cluster.resize(bpdv.size());
 		//bodypart_frame_cluster = cluster_frames_keyframes(15, bpdv, snhmaps, frame_datas);
 		
@@ -863,13 +874,22 @@ int main(int argc, char **argv)
 	}
 	else
 	{
-		load_packaged_file(packaged_file_path, bpdv, frame_datas, bodypart_frame_cluster, triangle_vertices, triangle_indices, voxels, voxel_size);
+		load_packaged_file(packaged_file_path, bpdv, frame_datas, bodypart_frame_cluster, triangle_vertices, triangle_indices, voxels, voxel_size, cylinders);
 		triangle_colors.resize(bpdv.size());
+		triangle_texcoords.resize(bpdv.size());
+		bodypart_texture.resize(bpdv.size());
+#if VIEW_DEPENDENT_TEXTURE == 1
 		for (int i = 0; i < bpdv.size(); ++i){
 			for (int j = 0; j < triangle_indices[i].size(); ++j){
+
 				triangle_colors[i].push_back(bpdv[i].mColor[0] * 0xff);
+				triangle_colors[i].push_back(bpdv[i].mColor[1] * 0xff);
+				triangle_colors[i].push_back(bpdv[i].mColor[2] * 0xff);
 			}
 		}
+#else
+#endif
+
 		for (int i = 0; i < frame_datas.size(); ++i){
 			snhmaps.push_back(SkeletonNodeHardMap());
 			cv_draw_and_build_skeleton(&frame_datas[i].mRoot, cv::Mat::eye(4, 4, CV_32F), frame_datas[i].mCameraMatrix, frame_datas[i].mCameraPose, &snhmaps[i]);
@@ -883,6 +903,7 @@ int main(int argc, char **argv)
 	glutInitWindowPosition(100, 100);
 	glutInitDisplayMode(GLUT_RGB | GLUT_DOUBLE | GLUT_DEPTH);
 	glutInit(&argc, argv);
+
 
 	window1 = glutCreateWindow(argv[0]);
 	glutDisplayFunc(display);
@@ -908,9 +929,9 @@ int main(int argc, char **argv)
 		model_center_inv = model_center.inv();
 	}
 
-	glClearColor(0.1f, 0.1f, 0.1f, 1.f);
-	bg_color = cv::Vec3b(0.1 * 0xff, 0.1 * 0xff, 0.1 * 0xff);
-	output_bg_color = cv::Scalar(0.1 * 0xff, 0.4 * 0xff, 0.3 * 0xff);
+	glClearColor(0.5f, 0.5f, 0.5f, 1.f);
+	bg_color = cv::Vec3b(0.5 * 0xff, 0.5 * 0xff, 0.5 * 0xff);
+	output_bg_color = cv::Scalar(0.5 * 0xff, 0.5 * 0xff, 0.5 * 0xff);
 
 	//glEnable(GL_LIGHTING);
 	//glEnable(GL_LIGHT0);    /* Uses default lighting parameters */
@@ -940,6 +961,135 @@ int main(int argc, char **argv)
 	for (int i = 0; i < bpdv.size(); ++i){
 		bodypart_precalculated_rotation_vectors[i] = precalculate_vecs(bpdv[i], snhmaps, frame_datas);
 	}
+
+
+	//need to do textures after gl context
+#if VIEW_DEPENDENT_TEXTURE != 1 
+	if (packaged_file_path != ""){
+		if (video_directory == ""){
+			std::size_t found = packaged_file_path.find_last_of("/\\");
+			video_directory = packaged_file_path.substr(0, found);
+		}
+		std::stringstream ss;
+		glEnable(GL_TEXTURE_2D);
+		glGenTextures(bpdv.size(), bodypart_texture.data());
+
+#if TEXTURE_MAP_CYLINDER == 1
+
+		std::string texture_dir = video_directory + "/cylinder_textures/";
+
+		for (int i = 0; i < bpdv.size(); ++i){
+			ss.str("");
+			ss << texture_dir << "texture" << i << ".png";
+			cv::Mat texture = cv::imread(ss.str());
+
+			cv::Mat texture_flip = texture.clone();
+
+			cv::Mat texture_flip_bgr;
+			cv::cvtColor(texture_flip, texture_flip_bgr, CV_BGR2RGB);
+
+			mat_to_texture(texture_flip_bgr, bodypart_texture[i]);
+
+			for (int j = 0; j < triangle_vertices[i].size(); j += 3){
+				cv::Vec4f vertex(triangle_vertices[i][j], triangle_vertices[i][j + 1], triangle_vertices[i][j + 2], 1);
+				float azimuth, height;
+				cartesian_to_cylinder_nodist(vertex, azimuth, height);
+				int U, V;
+				cylinder_to_uv(azimuth, height, voxels[i].height, texture.cols, texture.rows, U, V);
+
+				if (U < 0) U = 0;
+				else if (U > texture.cols - 1)U = texture.cols - 1;
+				if (V < 0) V = 0;
+				else if (V > texture.rows - 1)V = texture.rows - 1;
+
+				cv::Vec3b color = texture.ptr<cv::Vec3b>(V)[U];
+
+				triangle_colors[i].push_back(color[0]);
+				triangle_colors[i].push_back(color[1]);
+				triangle_colors[i].push_back(color[2]);
+
+				triangle_texcoords[i].push_back(U);
+				triangle_texcoords[i].push_back(V);
+			}
+
+		}
+#elif TEXTURE_MAP_TRIANGLES == 1
+
+		std::string texture_dir = video_directory + "/triangle_textures/";
+
+		cv::FileStorage fs;
+
+		for (int i = 0; i < bpdv.size(); ++i){
+			ss.str("");
+			ss << texture_dir << "texture" << i << ".png";
+			cv::Mat texture = cv::imread(ss.str());
+
+			cv::Mat texture_flip = texture.clone();
+
+			cv::Mat texture_flip_bgr;
+			cv::cvtColor(texture_flip, texture_flip_bgr, CV_BGR2RGB);
+
+			mat_to_texture(texture_flip_bgr, bodypart_texture[i]);
+
+			std::vector<cv::Vec3f> new_vertices(triangle_indices[i].size());
+
+			//redo triangle_indices, duplicating the vertices that are shared by multiple triangles
+			for (int j = 0; j < triangle_indices[i].size(); j += 3){
+				int ind1 = triangle_indices[i][j];
+				int ind2 = triangle_indices[i][j+1];
+				int ind3 = triangle_indices[i][j+2];
+
+				cv::Vec3f vert1(triangle_vertices[i][ind1 * 3], triangle_vertices[i][ind1 * 3 + 1], triangle_vertices[i][ind1 * 3 + 2]);
+				cv::Vec3f vert2(triangle_vertices[i][ind2 * 3], triangle_vertices[i][ind2 * 3 + 1], triangle_vertices[i][ind2 * 3 + 2]);
+				cv::Vec3f vert3(triangle_vertices[i][ind3 * 3], triangle_vertices[i][ind3 * 3 + 1], triangle_vertices[i][ind3 * 3 + 2]);
+
+				new_vertices[j + 0] = (vert1);
+				new_vertices[j + 1] = (vert2);
+				new_vertices[j + 2] = (vert3);
+			}
+
+			triangle_indices[i].clear();
+			triangle_vertices[i].clear();
+			triangle_colors[i].clear();
+			triangle_texcoords[i].clear();
+
+			triangle_indices[i].resize(new_vertices.size());
+			triangle_vertices[i].resize(new_vertices.size() * 3);
+
+			for (int j = 0; j < new_vertices.size(); ++j){
+				triangle_indices[i][j] = j;
+				triangle_vertices[i][j * 3 + 0] = new_vertices[j](0);
+				triangle_vertices[i][j * 3 + 1] = new_vertices[j](1);
+				triangle_vertices[i][j * 3 + 2] = new_vertices[j](2);
+			}
+
+			ss.str("");
+			ss << texture_dir << "/UV" << i << ".xml";
+			fs.open(ss.str(), cv::FileStorage::READ);
+
+			cv::FileNode uv_node = fs["UV"];
+
+			for (auto it = uv_node.begin(); it != uv_node.end(); ++it){
+				int U1, V1, U2, V2, U3, V3;
+
+				(*it)["U1"] >> U1;
+				(*it)["V1"] >> V1;
+				(*it)["U2"] >> U2;
+				(*it)["V2"] >> V2;
+				(*it)["U3"] >> U3;
+				(*it)["V3"] >> V3;
+
+				triangle_texcoords[i].push_back(U1);
+				triangle_texcoords[i].push_back(V1);
+				triangle_texcoords[i].push_back(U2);
+				triangle_texcoords[i].push_back(V2);
+				triangle_texcoords[i].push_back(U3);
+				triangle_texcoords[i].push_back(V3);
+			}
+		}
+#endif
+	}
+#endif
 
 	glutMainLoop();
 
