@@ -3,8 +3,6 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 
 */
 
-#include "cylinder.h"
-
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -18,18 +16,8 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 
 //#include <recons_common.h>
 #define AI_DEG_TO_RAD(x) ((x)*0.0174532925f)
-#include <ReconsVoxel.h>
-
-#include <cv_pointmat_common.h>
-#include <cv_draw_common.h>
 
 #include <glcv.h>
-#include <gh_render.h>
-#include <gh_search.h>
-#include <gh_common.h>
-#include <gh_texture.h>
-
-#include <fbolib.h>
 
 #include <ctime>
 
@@ -265,8 +253,6 @@ void display(void)
 
 	cv::Mat output_img = glrender_display(elapsed_time, opengl_modelview, win_width, win_height, flags);
 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
 	glClear(GL_COLOR);
 
 	//now display the rendered pts
@@ -274,8 +260,7 @@ void display(void)
 
 	if (debug_draw_skeleton){
 
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
+		glrender_skeleton(opengl_modelview);
 	}
 	
 	glutSwapBuffers();

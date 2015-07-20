@@ -803,7 +803,7 @@ cv::Mat glrender_display(double elapsed_time, const cv::Mat& opengl_modelview, i
 	return output_img_flip;
 }
 
-void drawskeleton_glrender(const cv::Mat& opengl_modelview){
+void glrender_skeleton(const cv::Mat& opengl_modelview){
 
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();

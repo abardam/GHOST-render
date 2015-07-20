@@ -20,4 +20,5 @@ void set_projection_matrix(const cv::Mat& camera_matrix, int win_width, int win_
 int glrender_load(int argc, char ** argv, double zNear, double zFar, int * out_width, int * out_height);
 void glrender_init();
 cv::Mat glrender_display(double elapsed_time, const cv::Mat& opengl_modelview, int win_width, int win_height, int flags);
+void glrender_skeleton(const cv::Mat& opengl_modelview);
 void glrender_release();
