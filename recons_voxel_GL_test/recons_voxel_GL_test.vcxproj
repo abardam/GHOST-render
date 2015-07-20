@@ -41,8 +41,8 @@
     <Import Project="$(PROPERTY_SHEETS_DIR)\GHOSTLIB_debug.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\OpenGL.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\FBOLIB_debug.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\ReconsOptimization_debug.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GLEW_debug.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\ReconsOptimization_debug.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\GLEW_debug.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
@@ -54,8 +54,8 @@
     <Import Project="$(PROPERTY_SHEETS_DIR)\GLCV.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\GHOSTLIB.props" />
     <Import Project="$(PROPERTY_SHEETS_DIR)\FBOLIB.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\ReconsOptimization.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GLEW.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\ReconsOptimization.props" />
+    <Import Project="$(PROPERTY_SHEETS_DIR)\GLEW.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
