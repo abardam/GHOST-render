@@ -11,8 +11,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{1F341293-CB3B-4E2A-ACFC-CE68C9970EEA}</ProjectGuid>
-    <RootNamespace>recons_voxel_GL_test</RootNamespace>
+    <ProjectGuid>{AA1B1EED-AA16-48E9-85F6-77EA704BAFC0}</ProjectGuid>
+    <RootNamespace>GHOST_GLRENDER</RootNamespace>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
@@ -33,45 +33,17 @@
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\OpenCV_debug.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\CvDraw_debug.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\ReconsVoxel_debug.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\GLUT.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\GLCV_debug.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\GHOSTLIB_debug.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\OpenGL.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\FBOLIB_debug.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\ReconsOptimization_debug.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GLEW_debug.props" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\OpenGL.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\OpenCV.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\CvDraw.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\ReconsVoxel.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\GLUT.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\GLCV.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\GHOSTLIB.props" />
-    <Import Project="$(PROPERTY_SHEETS_DIR)\FBOLIB.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\ReconsOptimization.props" />
-    <Import Project="C:\Users\fabian-d\Documents\Visual Studio 2013\Projects\PROPERTY SHEETS\GLEW.props" />
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <TargetName>$(ProjectName)</TargetName>
-  </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <TargetName>$(ProjectName)</TargetName>
-  </PropertyGroup>
+  <PropertyGroup />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\GHOST_GLRENDER\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -84,9 +56,6 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
-      <PreprocessorDefinitions>NOMINMAX;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>..\GHOST_GLRENDER\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -95,12 +64,12 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="Source.cpp" />
+    <ClCompile Include="cylinder.cpp" />
+    <ClCompile Include="gh_glrender.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\GHOST_GLRENDER\GHOST_GLRENDER.vcxproj">
-      <Project>{aa1b1eed-aa16-48e9-85f6-77ea704bafc0}</Project>
-    </ProjectReference>
+    <ClInclude Include="cylinder.h" />
+    <ClInclude Include="gh_glrender.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
