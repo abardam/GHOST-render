@@ -23,6 +23,4 @@ cv::Mat glrender_display(int frame, const cv::Mat& opengl_modelview, int win_wid
 void glrender_release();
 
 size_t glrender_get_numframes();
-cv::Mat glrender_display(double elapsed_time, const cv::Mat& opengl_modelview, int win_width, int win_height, int flags);
-void glrender_skeleton(const cv::Mat& opengl_modelview);
-void glrender_release();
+void glrender_skeleton(int anim_frame, const cv::Mat& opengl_modelview);

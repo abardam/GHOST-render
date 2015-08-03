@@ -274,7 +274,7 @@ void display(void)
 
 	if (debug_draw_skeleton){
 
-		glrender_skeleton(opengl_modelview);
+		glrender_skeleton(anim_frame, opengl_modelview);
 	}
 	
 	glutSwapBuffers();
