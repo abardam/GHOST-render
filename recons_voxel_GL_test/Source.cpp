@@ -82,6 +82,11 @@ bool playing = true;
 bool debug_shape_cylinders = false;
 bool debug_show_normals = false;
 
+//frame animation stuff
+int anim_frame = 0;
+float anim_frame_f = 0;
+#define ANIM_DEFAULT_FPS 12
+
 
 std::string debug_print_dir;
 int debug_ki_alpha_shiz = -1;
@@ -263,7 +268,16 @@ void display(void)
 	if (debug_shape_cylinders) flags |= GLR_SHAPE_CYLINDER;
 	if (debug_show_normals) flags |= GLR_SHOW_NORMALS;
 
-	cv::Mat output_img = glrender_display(elapsed_time, opengl_modelview, win_width, win_height, flags);
+	size_t max_frames = glrender_get_numframes();
+
+
+	anim_frame_f += (elapsed_time * ANIM_DEFAULT_FPS / 1000.f);
+	while (anim_frame_f >= max_frames){
+		anim_frame_f -= max_frames;
+	}
+	anim_frame = anim_frame_f;
+
+	cv::Mat output_img = glrender_display(anim_frame, opengl_modelview, win_width, win_height, flags);
 
 	glBindFramebuffer(GL_FRAMEBUFFER, 0);
 

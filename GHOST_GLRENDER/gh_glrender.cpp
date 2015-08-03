@@ -71,9 +71,9 @@ GLUquadric * quadric;
 FBO fbo1(1000, 1000);
 
 //frame animation stuff
-int anim_frame = 0;
-float anim_frame_f = 0;
-#define ANIM_DEFAULT_FPS 12
+//int anim_frame = 0;
+//float anim_frame_f = 0;
+//#define ANIM_DEFAULT_FPS 12
 
 double z_near, z_far;
 
@@ -473,25 +473,27 @@ void glrender_init(){
 
 }
 
-cv::Mat glrender_display(double elapsed_time, const cv::Mat& opengl_modelview, int win_width, int win_height, int flags){
+cv::Mat glrender_display(int anim_frame, const cv::Mat& opengl_modelview, int win_width, int win_height, int flags){
 
 	bool debug_shape_cylinders = flags & GLR_SHAPE_CYLINDER;
 	bool debug_untextured = flags & GLR_UNTEXTURED;
 	bool debug_show_normals = flags & GLR_SHOW_NORMALS;
 	bool debug_inspect_texture_map = flags & GLR_INSPECT_TEXTURE_MAP;
 
-	anim_frame_f += (elapsed_time * ANIM_DEFAULT_FPS / 1000.f);
-	if (anim_frame_f >= snhmaps.size()){
-		anim_frame_f -= snhmaps.size();
-	}
-	anim_frame = anim_frame_f;
-	anim_frame %= snhmaps.size();
-	while (skip_side && frame_datas[anim_frame].mnFacing != FACING_FRONT && frame_datas[anim_frame].mnFacing != FACING_BACK){
-		++anim_frame_f;
-		anim_frame = anim_frame_f;
-		anim_frame %= snhmaps.size();
-	}
-	anim_frame = anim_frame_f;
+	//anim_frame_f += (elapsed_time * ANIM_DEFAULT_FPS / 1000.f);
+	//if (anim_frame_f >= snhmaps.size()){
+	//	anim_frame_f -= snhmaps.size();
+	//}
+	//anim_frame = anim_frame_f;
+	//anim_frame %= snhmaps.size();
+	//while (skip_side && frame_datas[anim_frame].mnFacing != FACING_FRONT && frame_datas[anim_frame].mnFacing != FACING_BACK){
+	//	++anim_frame_f;
+	//	anim_frame = anim_frame_f;
+	//	anim_frame %= snhmaps.size();
+	//}
+	//anim_frame = anim_frame_f;
+
+	assert(anim_frame < snhmaps.size());
 
 	anim_frame %= snhmaps.size();
 
@@ -803,7 +805,7 @@ cv::Mat glrender_display(double elapsed_time, const cv::Mat& opengl_modelview, i
 	return output_img_flip;
 }
 
-void drawskeleton_glrender(const cv::Mat& opengl_modelview){
+void drawskeleton_glrender(int anim_frame, const cv::Mat& opengl_modelview){
 
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
@@ -859,4 +861,8 @@ void set_projection_matrix(const cv::Mat& camera_matrix, int win_width, int win_
 
 void glrender_release(){
 	gluDeleteQuadric(quadric);
+}
+
+size_t glrender_get_numframes(){
+	return snhmaps.size();
 }
