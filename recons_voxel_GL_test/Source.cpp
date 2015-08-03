@@ -3,8 +3,6 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 
 */
 
-#include "cylinder.h"
-
 #include <stdlib.h>
 #include <stdio.h>
 
@@ -18,18 +16,8 @@ ITP (In This Project) we attempt to perform marching cubes on the reconstructed 
 
 //#include <recons_common.h>
 #define AI_DEG_TO_RAD(x) ((x)*0.0174532925f)
-#include <ReconsVoxel.h>
-
-#include <cv_pointmat_common.h>
-#include <cv_draw_common.h>
 
 #include <glcv.h>
-#include <gh_render.h>
-#include <gh_search.h>
-#include <gh_common.h>
-#include <gh_texture.h>
-
-#include <fbolib.h>
 
 #include <ctime>
 
@@ -81,6 +69,11 @@ bool debug_draw_skeleton = true;
 bool playing = true;
 bool debug_shape_cylinders = false;
 bool debug_show_normals = false;
+
+//frame animation stuff
+int anim_frame = 0;
+float anim_frame_f = 0;
+#define ANIM_DEFAULT_FPS 12
 
 
 std::string debug_print_dir;
@@ -263,9 +256,16 @@ void display(void)
 	if (debug_shape_cylinders) flags |= GLR_SHAPE_CYLINDER;
 	if (debug_show_normals) flags |= GLR_SHOW_NORMALS;
 
-	cv::Mat output_img = glrender_display(elapsed_time, opengl_modelview, win_width, win_height, flags);
+	size_t max_frames = glrender_get_numframes();
 
-	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+	anim_frame_f += (elapsed_time * ANIM_DEFAULT_FPS / 1000.f);
+	while (anim_frame_f >= max_frames){
+		anim_frame_f -= max_frames;
+	}
+	anim_frame = anim_frame_f;
+
+	cv::Mat output_img = glrender_display(anim_frame, opengl_modelview, win_width, win_height, flags);
 
 	glClear(GL_COLOR);
 
@@ -274,8 +274,7 @@ void display(void)
 
 	if (debug_draw_skeleton){
 
-		glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
+		glrender_skeleton(anim_frame, opengl_modelview);
 	}
 	
 	glutSwapBuffers();
