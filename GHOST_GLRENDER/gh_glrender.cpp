@@ -538,15 +538,21 @@ cv::Mat glrender_display(int anim_frame, const cv::Mat& opengl_modelview, int wi
 	std::vector<cv::Vec3b> bodypart_color(bpdv.size());
 
 	int start_bp = 0;
-	int bp_inc = debug_shape_cylinders ? 1 : bpdv.size();
+	//int bp_inc = debug_shape_cylinders ? 1 : bpdv.size();
+	int bp_inc = bpdv.size();
 	cv::Mat output_img(win_height, win_width, CV_8UC4, cv::Scalar(0.5 * 0xff, 0.5 * 0xff, 0.5 * 0xff, 0));
 
+	int max_search = MAX_SEARCH;
+
 	glDisable(GL_LIGHTING);
+
+	for (int i = 0; i < bpdv.size(); ++i){
+		bodypart_color[i] = cv::Vec3b(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
+	}
 
 	for (start_bp; start_bp < bpdv.size(); start_bp += bp_inc){
 		int end_bp = start_bp + bp_inc;
 		for (int i = start_bp; i < end_bp; ++i){
-			bodypart_color[i] = cv::Vec3b(bpdv[i].mColor[0] * 0xff, bpdv[i].mColor[1] * 0xff, bpdv[i].mColor[2] * 0xff);
 
 			glPushMatrix();
 
@@ -684,7 +690,7 @@ cv::Mat glrender_display(int anim_frame, const cv::Mat& opengl_modelview, int wi
 
 					cv::Mat neutral_pts = (frame_datas[anim_frame].mCameraMatrix * source_transform).inv() * bodypart_pts;
 
-					int search_limit = std::min((int)best_frames.size(), MAX_SEARCH);
+					int search_limit = std::min((int)best_frames.size(), max_search);
 
 #if DEBUG_OUTPUT_TEXTURE
 					std::ofstream of;
@@ -710,7 +716,7 @@ cv::Mat glrender_display(int anim_frame, const cv::Mat& opengl_modelview, int wi
 					of.close();
 #endif
 
-					for (int best_frames_it = 0; best_frames_it < search_limit && !neutral_pts.empty(); ++best_frames_it){
+					for (int best_frames_it = 0; best_frames_it < search_limit; ++best_frames_it){
 
 						unsigned int best_frame = best_frames[best_frames_it];
 
@@ -723,11 +729,22 @@ cv::Mat glrender_display(int anim_frame, const cv::Mat& opengl_modelview, int wi
 						cv::Mat neutral_pts_occluded;
 						std::vector<cv::Point2i> _2d_pts_occluded;
 
-						inverse_point_mapping(neutral_pts, bodypart_pts_2d_v[i], frame_datas[best_frame].mCameraMatrix, target_transform,
-							frame_datas[best_frame].mBodyPartImages[i].mMat, frame_datas[best_frame].mBodyPartImages[i].mOffset, output_img, neutral_pts_occluded, _2d_pts_occluded, !debug_shape_cylinders, debug_inspect_texture_map);
+						if (debug_shape_cylinders){
+							inverse_point_mapping(neutral_pts, bodypart_pts_2d_v[i], frame_datas[best_frame].mCameraMatrix, target_transform,
+								frame_datas[best_frame].mBodyImage.mMat, frame_datas[best_frame].mBodyImage.mOffset, output_img, neutral_pts_occluded, _2d_pts_occluded, !debug_shape_cylinders, debug_inspect_texture_map);
 
-						neutral_pts = neutral_pts_occluded;
+						}
+						else{
+							inverse_point_mapping(neutral_pts, bodypart_pts_2d_v[i], frame_datas[best_frame].mCameraMatrix, target_transform,
+								frame_datas[best_frame].mBodyPartImages[i].mMat, frame_datas[best_frame].mBodyPartImages[i].mOffset, output_img, neutral_pts_occluded, _2d_pts_occluded, !debug_shape_cylinders, debug_inspect_texture_map);
+						}
 						bodypart_pts_2d_v[i] = _2d_pts_occluded;
+						if (!_2d_pts_occluded.empty()){
+							neutral_pts = neutral_pts_occluded(cv::Range(0, 4), cv::Range(0, _2d_pts_occluded.size()));
+						}
+						else{
+							break;
+						}
 					}
 
 					if (!bodypart_pts_2d_v[i].empty()){
