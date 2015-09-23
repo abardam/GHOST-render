@@ -683,10 +683,28 @@ cv::Mat glrender_display(int anim_frame, const cv::Mat& opengl_modelview, int wi
 
 					cv::Mat source_transform = transformation * get_bodypart_transform(bpdv[i], snhmaps[anim_frame], frame_datas[anim_frame].mCameraPose);
 
+
 					//cv::Mat flip_x = cv::Mat::eye(4, 4, CV_32F);
 					//flip_x.ptr<float>(0)[0] = -1;
 					//unsigned int best_frame = find_best_frame(bpdv[i], source_transform, snhmaps, bodypart_frame_cluster[i]);
 					std::vector<unsigned int> best_frames = sort_best_frames(bpdv[i], flip_x * source_transform, snhmaps, frame_datas, bodypart_precalculated_rotation_vectors[i], bodypart_frame_cluster[i]);
+
+
+					if (debug_shape_cylinders){
+						//remove the y-rotation
+						cv::Vec3f axis_endpoint = source_transform(cv::Range(0,3),cv::Range(3,4));
+						cv::Vec3f axis_direction = source_transform(cv::Range(0,3),cv::Range(1,2));
+						cv::Vec3f front_vector = axis_direction.cross((-axis_endpoint).cross(axis_direction));
+						cv::Vec3f side_vector = axis_direction.cross(front_vector);
+						
+						source_transform.ptr<float>(0)[2] = front_vector(0);
+						source_transform.ptr<float>(1)[2] = front_vector(1);
+						source_transform.ptr<float>(2)[2] = front_vector(2);
+
+						source_transform.ptr<float>(0)[0] = side_vector(0);
+						source_transform.ptr<float>(1)[0] = side_vector(1);
+						source_transform.ptr<float>(2)[0] = side_vector(2);
+					}
 
 					cv::Mat neutral_pts = (frame_datas[anim_frame].mCameraMatrix * source_transform).inv() * bodypart_pts;
 
@@ -725,6 +743,23 @@ cv::Mat glrender_display(int anim_frame, const cv::Mat& opengl_modelview, int wi
 						//}
 						cv::Mat target_transform = get_bodypart_transform(bpdv[i], snhmaps[best_frame], frame_datas[best_frame].mCameraPose);
 						//cv::Mat bodypart_img_uncropped = uncrop_mat(frame_datas[best_frame].mBodyPartImages[i], cv::Vec3b(0xff, 0xff, 0xff)); //uncrop is slow, just offset the cropped mat
+
+						if (debug_shape_cylinders){
+
+							//remove the y-rotation
+							cv::Vec3f axis_endpoint = target_transform(cv::Range(0, 3), cv::Range(3, 4));
+							cv::Vec3f axis_direction = target_transform(cv::Range(0, 3), cv::Range(1, 2));
+							cv::Vec3f front_vector = axis_direction.cross((-axis_endpoint).cross(axis_direction));
+							cv::Vec3f side_vector = axis_direction.cross(front_vector);
+
+							target_transform.ptr<float>(0)[2] = front_vector(0);
+							target_transform.ptr<float>(1)[2] = front_vector(1);
+							target_transform.ptr<float>(2)[2] = front_vector(2);
+
+							target_transform.ptr<float>(0)[0] = side_vector(0);
+							target_transform.ptr<float>(1)[0] = side_vector(1);
+							target_transform.ptr<float>(2)[0] = side_vector(2);
+						}
 
 						cv::Mat neutral_pts_occluded;
 						std::vector<cv::Point2i> _2d_pts_occluded;
